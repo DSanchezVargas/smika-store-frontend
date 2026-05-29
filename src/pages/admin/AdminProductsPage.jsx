@@ -12,7 +12,7 @@ import {
 import FormSection from "../../components/admin/FormSection";
 import ImageDropzone from "../../components/admin/ImageDropzone";
 import SwitchInput from "../../components/admin/SwitchInput";
-import CreatableSelect from "../../components/admin/CreatableSelect";
+import MultiCreatableSelect from "../../components/admin/MultiCreatableSelect";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 
 import { useAdminData } from "../../context/AdminDataContext";
@@ -69,6 +69,40 @@ function getProductEvento(product) {
   }
 
   return product?.eventoNombre || product?.evento || "";
+}
+
+function normalizePersonajesFromProduct(product) {
+  if (Array.isArray(product?.personajesNombre)) {
+    return product.personajesNombre.filter(Boolean);
+  }
+
+  if (Array.isArray(product?.personajes)) {
+    return product.personajes
+      .map((personaje) => {
+        if (typeof personaje === "object" && personaje !== null) {
+          return personaje.nombre || personaje.name || "";
+        }
+
+        return "";
+      })
+      .filter(Boolean);
+  }
+
+  if (product?.personajeNombre) {
+    return product.personajeNombre
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+  }
+
+  if (product?.personaje) {
+    return product.personaje
+      .split(",")
+      .map((name) => name.trim())
+      .filter(Boolean);
+  }
+
+  return [];
 }
 
 function AdminProductsPage() {
@@ -129,11 +163,7 @@ function AdminProductsPage() {
       serie: getProductSerie(product),
       tipo: getProductType(product),
       evento: getProductEvento(product),
-      personaje:
-        product.personajeNombre ||
-        product.personaje ||
-        product.personajesNombre?.[0] ||
-        "",
+      personajes: normalizePersonajesFromProduct(product),
       material: product.material || "",
       precio: getProductPrice(product),
       stock: product.stock || "",
@@ -190,6 +220,10 @@ function AdminProductsPage() {
     try {
       const preparedImages = await prepareProductImagesForSave(images);
 
+      const personajesNombre = Array.isArray(form.personajes)
+        ? form.personajes.filter(Boolean)
+        : [];
+
       const payload = {
         nombre: form.nombre.trim(),
         descripcion:
@@ -205,8 +239,10 @@ function AdminProductsPage() {
         evento: form.evento,
         eventoNombre: form.evento,
 
-        personaje: form.personaje,
-        personajeNombre: form.personaje,
+        personajes: [],
+        personajesNombre,
+        personaje: personajesNombre[0] || "",
+        personajeNombre: personajesNombre.join(", "),
 
         material: form.material,
         tamano: form.tamano,
@@ -222,8 +258,8 @@ function AdminProductsPage() {
           form.estado === "Preventa"
             ? "preventa"
             : form.estado === "Agotado"
-              ? "agotado"
-              : "stock",
+            ? "agotado"
+            : "stock",
 
         adulto: Boolean(form.adulto),
         imagenes: preparedImages,
@@ -250,7 +286,7 @@ function AdminProductsPage() {
     } catch (error) {
       setMessage(
         error.message ||
-        "No se pudo guardar el producto. Revisa tu sesión de administrador o la conexión con el servidor."
+          "No se pudo guardar el producto. Revisa tu sesión de administrador o la conexión con el servidor."
       );
     } finally {
       setIsSaving(false);
@@ -626,16 +662,16 @@ function AdminProductsPage() {
           </FormSection>
 
           <FormSection
-            title="Personaje"
-            description="Puedes elegir un personaje existente o agregar uno rápido."
+            title="Personajes"
+            description="Puedes elegir uno o varios personajes relacionados con el producto."
           >
-            <CreatableSelect
-              label="Personaje opcional"
-              value={form.personaje}
-              onChange={(value) =>
+            <MultiCreatableSelect
+              label="Personajes opcionales"
+              values={form.personajes}
+              onChange={(values) =>
                 setForm({
                   ...form,
-                  personaje: value
+                  personajes: values
                 })
               }
               options={activeCharacters}
@@ -652,7 +688,7 @@ function AdminProductsPage() {
                 })
               }
               placeholder="Escribe un personaje, por ejemplo: Tamon"
-              emptyLabel="Sin personaje"
+              emptyLabel="Sin personajes"
               emptyCreateLabel="Agregar personaje"
               createLabel={(name) =>
                 form.serie
@@ -666,8 +702,8 @@ function AdminProductsPage() {
               }
               helperText={
                 form.serie
-                  ? `Puedes asociar el personaje a “${form.serie}” o agregarlo sin serie si pertenece a una marca/evento.`
-                  : "Puedes elegir o crear un personaje aunque todavía no hayas seleccionado una serie."
+                  ? `Puedes seleccionar varios personajes y asociar nuevos a “${form.serie}”.`
+                  : "Puedes elegir o crear varios personajes aunque todavía no hayas seleccionado una serie."
               }
             />
           </FormSection>
@@ -720,8 +756,8 @@ function AdminProductsPage() {
               {isSaving
                 ? "Guardando..."
                 : editingProduct
-                  ? "Guardar cambios"
-                  : "Crear producto"}
+                ? "Guardar cambios"
+                : "Crear producto"}
             </button>
           </div>
         </form>
