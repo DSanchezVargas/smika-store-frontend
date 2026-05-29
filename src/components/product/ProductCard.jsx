@@ -60,9 +60,24 @@ function getProductCategory(product) {
   return product?.categoriaNombre || product?.category || getProductType(product);
 }
 
-function getStatusText(product) {
+function isAvailabilityByConfirmation(product) {
+  const stock = Number(product?.stock || 0);
+  const text = (product?.tiempoEstimado || "").trim();
+
+  return stock <= 0 && Boolean(text);
+}
+
+function getAvailabilityText(product) {
+  if (isAvailabilityByConfirmation(product)) {
+    return product.tiempoEstimado || "Disponibilidad por confirmar con Smika Store 💖";
+  }
+
+  const stock = Number(product?.stock || 0);
+
+  if (stock > 0) return `${stock} disponibles`;
+
   const statusText = {
-    stock: "En stock",
+    stock: "Disponible",
     preventa: "Preventa",
     por_pedido: "Por pedido",
     agotado: "Agotado"
@@ -72,7 +87,7 @@ function getStatusText(product) {
     statusText[product?.disponibilidad] ||
     statusText[product?.status] ||
     product?.estado ||
-    "Disponible"
+    "Consultar disponibilidad"
   );
 }
 
@@ -94,7 +109,7 @@ function ProductCard({ product }) {
   const productPrice = getProductPrice(product);
   const productCategory = getProductCategory(product);
   const productSeries = getProductSeries(product);
-  const status = getStatusText(product);
+  const availabilityText = getAvailabilityText(product);
 
   const goToLogin = () => {
     navigate(
@@ -109,7 +124,7 @@ function ProductCard({ product }) {
 
     setTimeout(() => {
       setCartMessage("");
-    }, 2500);
+    }, 2600);
   };
 
   const handleAddToCart = async () => {
@@ -123,7 +138,7 @@ function ProductCard({ product }) {
       setCartMessage("");
 
       if (!isMongoObjectId(productId)) {
-        showTemporaryMessage("Este producto aún no está guardado en MongoDB.");
+        showTemporaryMessage("Este producto aún está siendo preparado. Intenta nuevamente más tarde.");
         return;
       }
 
@@ -131,6 +146,11 @@ function ProductCard({ product }) {
 
       showTemporaryMessage("Agregado a lista");
     } catch (error) {
+      if (error.status === 401 || error.message?.toLowerCase().includes("token")) {
+        goToLogin();
+        return;
+      }
+
       showTemporaryMessage(error.message || "No se pudo agregar a la lista.");
     } finally {
       setCartLoading(false);
@@ -159,8 +179,8 @@ function ProductCard({ product }) {
               draggable="false"
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center bg-[#F7D9D8] text-4xl font-black text-[#2F2F2F]">
-              Smika
+            <div className="flex h-full w-full items-center justify-center bg-[#87CCC8] text-5xl font-black text-white">
+              {getProductType(product).slice(0, 12)}
             </div>
           )}
         </div>
@@ -194,7 +214,7 @@ function ProductCard({ product }) {
         <div className="mt-4 flex items-center justify-between gap-3">
           <div>
             <p className="text-xl font-black">S/ {productPrice}</p>
-            <p className="text-xs text-gray-500">{status}</p>
+            <p className="text-xs text-gray-500">{availabilityText}</p>
           </div>
 
           <button

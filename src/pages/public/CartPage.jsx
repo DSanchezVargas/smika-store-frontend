@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  ExternalLink,
   Loader2,
+  MessageCircle,
   Minus,
   Plus,
   ShoppingBag,
@@ -17,41 +17,70 @@ import {
   removeProductFromCart,
   updateCartQuantity
 } from "../../services/cartService";
+import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 
-function getLoginPath(location) {
-  const currentPath = `${location.pathname}${location.search || ""}`;
+function getProductId(product) {
+  return product?._id || product?.id || "";
+}
 
-  return `/login?redirect=${encodeURIComponent(currentPath)}`;
+function getProductPrice(product, item) {
+  return Number(
+    item?.precioReferencialUnitario ||
+      product?.precioReferencial ||
+      product?.precio ||
+      product?.price ||
+      0
+  );
+}
+
+function getRelatedName(value, fallback = "") {
+  if (value && typeof value === "object") {
+    return value.nombre || value.titulo || value.name || fallback || "";
+  }
+
+  return value || fallback || "";
+}
+
+function getProductSerie(product) {
+  return getRelatedName(product?.serie, product?.serieNombre || "");
+}
+
+function getProductEvento(product) {
+  return getRelatedName(product?.evento, product?.eventoNombre || "");
 }
 
 function getProductImage(product) {
   const firstImage = product?.imagenes?.[0];
 
-  if (!firstImage) return "";
-
   if (typeof firstImage === "string") return firstImage;
 
-  return firstImage.finalPreview || firstImage.preview || firstImage.url || "";
+  if (firstImage) {
+    return firstImage.finalPreview || firstImage.url || firstImage.preview || "";
+  }
+
+  return product?.image || product?.imagen || "";
 }
 
-function getProductName(product) {
-  return product?.nombre || "Producto Smika";
+function isAvailabilityByConfirmation(product) {
+  const stock = Number(product?.stock || 0);
+  const text = (product?.tiempoEstimado || "").trim();
+
+  return stock <= 0 && Boolean(text);
 }
 
-function getProductSerie(product) {
-  if (!product?.serie) return product?.serieNombre || "";
+function getAvailabilityText(product) {
+  if (isAvailabilityByConfirmation(product)) {
+    return (
+      product.tiempoEstimado ||
+      "Disponibilidad por confirmar con Smika Store 💖"
+    );
+  }
 
-  if (typeof product.serie === "string") return product.serie;
+  const stock = Number(product?.stock || 0);
 
-  return product.serie.nombre || product.serieNombre || "";
-}
+  if (stock > 0) return `${stock} disponibles`;
 
-function getProductEvento(product) {
-  if (!product?.evento) return product?.eventoNombre || "";
-
-  if (typeof product.evento === "string") return product.evento;
-
-  return product.evento.titulo || product.evento.nombre || product.eventoNombre || "";
+  return "Consultar disponibilidad";
 }
 
 function CartPage() {
@@ -62,43 +91,52 @@ function CartPage() {
   const [cart, setCart] = useState(null);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
-  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
 
   const user = auth?.user || auth?.currentUser || null;
   const isAuthenticated = Boolean(auth?.isAuthenticated || user);
-  const loadingAuth = Boolean(auth?.loadingAuth);
 
   const items = cart?.items || [];
 
-  const total = useMemo(() => {
-    return Number(cart?.totalReferencial || 0);
-  }, [cart]);
+  const totalReferencial = useMemo(() => {
+    return items.reduce((total, item) => {
+      const product = item.producto;
+      const price = getProductPrice(product, item);
+      const quantity = Number(item.cantidad || 1);
+
+      return total + price * quantity;
+    }, 0);
+  }, [items]);
 
   const goToLogin = () => {
-    navigate(getLoginPath(location), { replace: true });
+    navigate(
+      `/login?redirect=${encodeURIComponent(
+        location.pathname + location.search
+      )}`
+    );
   };
 
   const loadCart = async () => {
-    if (loadingAuth) return;
-
     if (!isAuthenticated) {
-      goToLogin();
+      setLoading(false);
       return;
     }
 
     try {
       setLoading(true);
-      setError("");
-
       const data = await getCart();
       setCart(data.cart);
+      setMessage("");
     } catch (error) {
-      if (error?.status === 401) {
+      if (
+        error.status === 401 ||
+        error.message?.toLowerCase().includes("token")
+      ) {
         goToLogin();
         return;
       }
 
-      setError(error.message || "No se pudo cargar la lista de pedido.");
+      setMessage(error.message || "No se pudo cargar la lista de pedido.");
     } finally {
       setLoading(false);
     }
@@ -107,47 +145,29 @@ function CartPage() {
   useEffect(() => {
     loadCart();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loadingAuth, isAuthenticated]);
+  }, [isAuthenticated]);
 
-  const handleQuantityChange = async (productId, quantity) => {
-    if (!productId) return;
+  const handleUpdateQuantity = async (productId, nextQuantity) => {
+    if (nextQuantity < 1) return;
 
     try {
       setActionLoading(true);
-      setError("");
-
-      const safeQuantity = Math.max(1, Number(quantity || 1));
-      const data = await updateCartQuantity(productId, safeQuantity);
-
+      const data = await updateCartQuantity(productId, nextQuantity);
       setCart(data.cart);
     } catch (error) {
-      if (error?.status === 401) {
-        goToLogin();
-        return;
-      }
-
-      setError(error.message || "No se pudo actualizar la cantidad.");
+      setMessage(error.message || "No se pudo actualizar la cantidad.");
     } finally {
       setActionLoading(false);
     }
   };
 
-  const handleRemove = async (productId) => {
-    if (!productId) return;
-
+  const handleRemoveItem = async (productId) => {
     try {
       setActionLoading(true);
-      setError("");
-
       const data = await removeProductFromCart(productId);
       setCart(data.cart);
     } catch (error) {
-      if (error?.status === 401) {
-        goToLogin();
-        return;
-      }
-
-      setError(error.message || "No se pudo quitar el producto.");
+      setMessage(error.message || "No se pudo quitar el producto.");
     } finally {
       setActionLoading(false);
     }
@@ -156,17 +176,11 @@ function CartPage() {
   const handleClearCart = async () => {
     try {
       setActionLoading(true);
-      setError("");
-
       const data = await clearCart();
       setCart(data.cart);
+      setMessage("Lista vaciada correctamente.");
     } catch (error) {
-      if (error?.status === 401) {
-        goToLogin();
-        return;
-      }
-
-      setError(error.message || "No se pudo vaciar la lista.");
+      setMessage(error.message || "No se pudo vaciar la lista.");
     } finally {
       setActionLoading(false);
     }
@@ -175,29 +189,33 @@ function CartPage() {
   const handleSendWhatsApp = async () => {
     try {
       setActionLoading(true);
-      setError("");
-
       const data = await generateCartWhatsApp();
 
-      window.open(data.whatsappUrl, "_blank", "noopener,noreferrer");
-    } catch (error) {
-      if (error?.status === 401) {
-        goToLogin();
-        return;
+      if (data.whatsappUrl) {
+        window.open(data.whatsappUrl, "_blank", "noopener,noreferrer");
       }
 
-      setError(error.message || "No se pudo generar el mensaje de WhatsApp.");
+      setMessage("Mensaje preparado para WhatsApp.");
+    } catch (error) {
+      setMessage(error.message || "No se pudo generar el mensaje de WhatsApp.");
     } finally {
       setActionLoading(false);
     }
   };
 
-  if (loadingAuth || loading) {
+  if (!isAuthenticated) {
     return (
       <section className="container-smika py-12">
-        <div className="smika-card p-10 text-center">
-          <Loader2 className="mx-auto animate-spin text-[#87CCC8]" size={34} />
-          <p className="mt-4 font-black">Cargando lista de pedido...</p>
+        <div className="rounded-[32px] bg-[#F8F6F7] p-8 text-center">
+          <p className="text-[#87CCC8] font-black">Lista de pedido</p>
+          <h2 className="mt-2 text-4xl font-black">Inicia sesión</h2>
+          <p className="mt-3 text-gray-600">
+            Para guardar productos en tu lista de pedido necesitas iniciar
+            sesión.
+          </p>
+          <button onClick={goToLogin} className="mt-6 smika-button-primary">
+            Ir a login
+          </button>
         </div>
       </section>
     );
@@ -205,178 +223,201 @@ function CartPage() {
 
   return (
     <section className="container-smika py-12">
-      <div className="rounded-[32px] bg-[#F8F6F7] p-8 mb-8">
+      <div className="rounded-[32px] bg-[#F8F6F7] p-8">
         <p className="text-[#87CCC8] font-black">Lista de pedido</p>
-
-        <h2 className="text-4xl font-black mt-2">Productos seleccionados</h2>
-
+        <h2 className="mt-2 text-4xl font-black">Productos seleccionados</h2>
         <p className="mt-3 text-gray-600">
-          Aquí aparecerán los productos que agregues antes de enviar el pedido
-          por WhatsApp.
+          Revisa los productos que quieres consultar o pedir antes de enviar el
+          mensaje a Smika Store por WhatsApp.
         </p>
       </div>
 
-      {error && (
-        <div className="mb-6 rounded-3xl bg-red-50 px-5 py-4 text-sm font-bold text-red-600">
-          {error}
+      {message && (
+        <div className="mt-6 rounded-3xl bg-[#F7D9D8] px-5 py-4 text-sm font-black">
+          {message}
         </div>
       )}
 
-      {items.length === 0 ? (
-        <div className="smika-card p-10 text-center">
-          <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-[#F7D9D8] text-[#D1B0C7]">
-            <ShoppingBag size={34} />
-          </div>
-
-          <h3 className="mt-5 text-2xl font-black">Tu lista está vacía</h3>
-
-          <p className="mt-3 text-sm text-gray-500">
-            Agrega productos desde el catálogo para preparar tu pedido.
+      {loading ? (
+        <div className="mt-8 smika-card p-8 text-center">
+          <Loader2 size={44} className="mx-auto animate-spin text-[#87CCC8]" />
+          <p className="mt-4 font-black">Cargando lista...</p>
+        </div>
+      ) : items.length === 0 ? (
+        <div className="mt-8 smika-card p-8 text-center">
+          <ShoppingBag size={44} className="mx-auto text-[#D1B0C7]" />
+          <h3 className="mt-4 text-2xl font-black">Tu lista está vacía</h3>
+          <p className="mt-2 text-gray-600">
+            Agrega productos del catálogo para preparar tu consulta.
           </p>
 
           <Link
             to="/nuevos-productos"
-            className="mt-6 inline-flex rounded-full bg-[#87CCC8] px-6 py-3 font-black text-white"
+            className="mt-6 inline-flex smika-button-primary"
           >
             Ver productos
           </Link>
         </div>
       ) : (
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_360px]">
           <div className="space-y-4">
             {items.map((item) => {
               const product = item.producto;
-              const productId = product?._id || product?.id || "";
+              const productId = getProductId(product);
               const quantity = Number(item.cantidad || 1);
-              const unitPrice = Number(item.precioReferencialUnitario || 0);
-              const subtotal = quantity * unitPrice;
+              const price = getProductPrice(product, item);
+              const subtotal = quantity * price;
               const image = getProductImage(product);
-              const serie = getProductSerie(product);
-              const evento = getProductEvento(product);
+              const requiresConfirmation =
+                isAvailabilityByConfirmation(product);
 
               return (
-                <div
-                  key={productId || item._id}
-                  className="rounded-[28px] border border-[#87CCC8]/20 bg-white p-4 smika-shadow"
-                >
-                  <div className="grid gap-4 sm:grid-cols-[120px_1fr_auto] sm:items-center">
-                    <div className="aspect-square overflow-hidden rounded-3xl bg-[#F8F6F7]">
-                      {image ? (
+                <article key={productId} className="smika-card p-5 smika-shadow">
+                  <div className="flex flex-col gap-4 sm:flex-row">
+                    <div className="h-28 w-28 shrink-0 overflow-hidden rounded-3xl bg-[#F8F6F7]">
+                      {product?.imagenes?.[0] ? (
+                        <CroppedImagePreview
+                          image={product.imagenes[0]}
+                          alt={product.nombre}
+                          className="h-full w-full"
+                          rounded="rounded-3xl"
+                        />
+                      ) : image ? (
                         <img
                           src={image}
-                          alt={getProductName(product)}
-                          className="h-full w-full object-cover"
+                          alt={product?.nombre || "Producto"}
+                          className="h-full w-full object-contain p-2"
                         />
                       ) : (
-                        <div className="flex h-full w-full items-center justify-center bg-[#87CCC8] text-xl font-black text-white">
-                          S
+                        <div className="flex h-full w-full items-center justify-center bg-[#87CCC8] text-white">
+                          <ShoppingBag size={28} />
                         </div>
                       )}
                     </div>
 
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <h3 className="text-xl font-black text-[#2F2F2F]">
-                        {getProductName(product)}
+                        {product?.nombre || "Producto Smika"}
                       </h3>
 
-                      <div className="mt-2 grid gap-1 text-sm text-gray-500">
-                        {serie && <p>Serie: {serie}</p>}
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs font-black">
+                        {getProductSerie(product) && (
+                          <span className="rounded-full bg-[#87CCC8]/15 px-3 py-1">
+                            {getProductSerie(product)}
+                          </span>
+                        )}
 
                         {product?.tipoProducto && (
-                          <p>Tipo: {product.tipoProducto}</p>
+                          <span className="rounded-full bg-[#F7D9D8] px-3 py-1">
+                            {product.tipoProducto}
+                          </span>
                         )}
 
-                        {evento && <p>Evento: {evento}</p>}
+                        {getProductEvento(product) && (
+                          <span className="rounded-full bg-[#D1B0C7]/30 px-3 py-1">
+                            {getProductEvento(product)}
+                          </span>
+                        )}
+                      </div>
 
-                        {product?.disponibilidad && (
-                          <p>
-                            Disponibilidad:{" "}
-                            {product.disponibilidad.replace("_", " ")}
+                      <p className="mt-3 text-sm font-bold text-gray-600">
+                        {getAvailabilityText(product)}
+                      </p>
+
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                        <div>
+                          <p className="font-black">
+                            Precio referencial: S/ {price}
                           </p>
+                          <p className="text-sm text-gray-500">
+                            {requiresConfirmation
+                              ? `Subtotal referencial: S/ ${price}`
+                              : `Subtotal: S/ ${subtotal}`}
+                          </p>
+                        </div>
+
+                        {requiresConfirmation ? (
+                          <div className="rounded-full bg-[#F7D9D8] px-4 py-2 text-sm font-black">
+                            Cantidad: Consultar disponibilidad
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              disabled={actionLoading || quantity <= 1}
+                              onClick={() =>
+                                handleUpdateQuantity(productId, quantity - 1)
+                              }
+                              className="h-9 w-9 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-50"
+                            >
+                              <Minus size={16} />
+                            </button>
+
+                            <span className="min-w-8 text-center font-black">
+                              {quantity}
+                            </span>
+
+                            <button
+                              type="button"
+                              disabled={actionLoading}
+                              onClick={() =>
+                                handleUpdateQuantity(productId, quantity + 1)
+                              }
+                              className="h-9 w-9 rounded-full bg-[#87CCC8] text-white flex items-center justify-center disabled:opacity-50"
+                            >
+                              <Plus size={16} />
+                            </button>
+                          </div>
                         )}
-                      </div>
-
-                      <p className="mt-3 font-black">S/ {unitPrice} c/u</p>
-                    </div>
-
-                    <div className="flex flex-col gap-3 sm:items-end">
-                      <div className="flex items-center gap-2 rounded-full bg-[#F8F6F7] p-2">
-                        <button
-                          type="button"
-                          disabled={actionLoading || !productId}
-                          onClick={() =>
-                            handleQuantityChange(productId, quantity - 1)
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-full bg-white disabled:opacity-50"
-                        >
-                          <Minus size={15} />
-                        </button>
-
-                        <span className="min-w-8 text-center font-black">
-                          {quantity}
-                        </span>
 
                         <button
                           type="button"
-                          disabled={actionLoading || !productId}
-                          onClick={() =>
-                            handleQuantityChange(productId, quantity + 1)
-                          }
-                          className="flex h-8 w-8 items-center justify-center rounded-full bg-white disabled:opacity-50"
+                          disabled={actionLoading}
+                          onClick={() => handleRemoveItem(productId)}
+                          className="h-10 w-10 rounded-full bg-[#F7D9D8] flex items-center justify-center disabled:opacity-50"
+                          title="Quitar producto"
                         >
-                          <Plus size={15} />
+                          <Trash2 size={17} />
                         </button>
                       </div>
-
-                      <p className="text-lg font-black">S/ {subtotal}</p>
-
-                      <button
-                        type="button"
-                        disabled={actionLoading || !productId}
-                        onClick={() => handleRemove(productId)}
-                        className="inline-flex items-center gap-2 rounded-full bg-red-50 px-4 py-2 text-sm font-black text-red-500 disabled:opacity-50"
-                      >
-                        <Trash2 size={15} />
-                        Quitar
-                      </button>
                     </div>
                   </div>
-                </div>
+                </article>
               );
             })}
           </div>
 
-          <aside className="h-fit rounded-[28px] bg-white p-6 smika-shadow">
-            <p className="font-black text-[#87CCC8]">Resumen</p>
+          <aside className="h-fit rounded-[32px] bg-white p-6 smika-shadow">
+            <p className="text-[#87CCC8] font-black">Resumen</p>
+            <h3 className="mt-2 text-2xl font-black">Pedido referencial</h3>
 
-            <h3 className="mt-2 text-2xl font-black">Pedido por WhatsApp</h3>
+            <div className="mt-6 space-y-3 text-sm">
+              <div className="flex justify-between gap-4">
+                <span>Productos seleccionados</span>
+                <strong>{items.length}</strong>
+              </div>
 
-            <div className="mt-5 space-y-3 text-sm text-gray-600">
-              <p>
-                Productos diferentes: <strong>{items.length}</strong>
-              </p>
-
-              <p>
-                Total referencial:{" "}
-                <strong className="text-[#2F2F2F]">S/ {total}</strong>
-              </p>
-
-              <p>
-                La disponibilidad final se confirma por WhatsApp, especialmente
-                si el evento es temporal o tiene stock limitado.
-              </p>
+              <div className="flex justify-between gap-4">
+                <span>Total referencial</span>
+                <strong>S/ {totalReferencial}</strong>
+              </div>
             </div>
+
+            <p className="mt-5 text-xs leading-5 text-gray-500">
+              Los productos con disponibilidad por confirmar se enviarán a
+              WhatsApp para que Smika Store valide disponibilidad y coordinación.
+            </p>
 
             <button
               type="button"
               disabled={actionLoading}
               onClick={handleSendWhatsApp}
-              className="mt-6 flex w-full items-center justify-center gap-2 rounded-full bg-[#87CCC8] px-5 py-3 font-black text-white disabled:opacity-60"
+              className="mt-6 w-full smika-button-primary inline-flex items-center justify-center gap-2 disabled:opacity-60"
             >
               {actionLoading ? (
-                <Loader2 className="animate-spin" size={18} />
+                <Loader2 size={18} className="animate-spin" />
               ) : (
-                <ExternalLink size={18} />
+                <MessageCircle size={18} />
               )}
               Enviar pedido al WhatsApp
             </button>
@@ -385,7 +426,7 @@ function CartPage() {
               type="button"
               disabled={actionLoading}
               onClick={handleClearCart}
-              className="mt-3 w-full rounded-full bg-[#F7D9D8] px-5 py-3 font-black disabled:opacity-60"
+              className="mt-3 w-full rounded-full bg-[#F8F6F7] px-5 py-3 text-sm font-black disabled:opacity-60"
             >
               Vaciar lista
             </button>

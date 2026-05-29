@@ -18,6 +18,8 @@ import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 import { useAdminData } from "../../context/AdminDataContext";
 import { prepareProductImagesForSave } from "../../utils/prepareProductImagesForSave";
 
+const DEFAULT_AVAILABILITY_TEXT = "Disponibilidad por confirmar con Smika Store 💖";
+
 const initialForm = {
   nombre: "",
   serie: "",
@@ -79,7 +81,7 @@ function normalizePersonajesFromProduct(product) {
   if (Array.isArray(product?.personajes)) {
     return product.personajes
       .map((personaje) => {
-        if (typeof personaje === "object" && personaje !== null) {
+        if (personaje && typeof personaje === "object") {
           return personaje.nombre || personaje.name || "";
         }
 
@@ -103,6 +105,50 @@ function normalizePersonajesFromProduct(product) {
   }
 
   return [];
+}
+
+function parseStockOrAvailability(value) {
+  const cleanValue =
+    value === undefined || value === null ? "" : value.toString().trim();
+
+  const isNumeric = /^\d+$/.test(cleanValue);
+
+  if (isNumeric) {
+    return {
+      stock: Number(cleanValue),
+      tiempoEstimado: "",
+      disponibilidad: Number(cleanValue) > 0 ? "stock" : "por_pedido"
+    };
+  }
+
+  return {
+    stock: 0,
+    tiempoEstimado: cleanValue || DEFAULT_AVAILABILITY_TEXT,
+    disponibilidad: "por_pedido"
+  };
+}
+
+function getStockInputFromProduct(product) {
+  const stock = Number(product?.stock || 0);
+  const availabilityText = product?.tiempoEstimado || "";
+
+  if (availabilityText && stock <= 0) return availabilityText;
+
+  return stock ? String(stock) : "";
+}
+
+function getAvailabilitySummary(product) {
+  const stock = Number(product?.stock || 0);
+
+  if (stock > 0) {
+    return `Cantidad disponible: ${stock}`;
+  }
+
+  if (product?.tiempoEstimado) {
+    return "Disponibilidad por confirmar";
+  }
+
+  return "Sin cantidad fija";
 }
 
 function AdminProductsPage() {
@@ -129,17 +175,17 @@ function AdminProductsPage() {
   const [isSaving, setIsSaving] = useState(false);
 
   const activeSeries = useMemo(
-    () => series.filter((item) => item.activo),
+    () => (series || []).filter((item) => item.activo !== false),
     [series]
   );
 
   const activeEvents = useMemo(
-    () => events.filter((item) => item.activo),
+    () => (events || []).filter((item) => item.activo !== false),
     [events]
   );
 
   const activeCharacters = useMemo(
-    () => characters.filter((item) => item.activo),
+    () => (characters || []).filter((item) => item.activo !== false),
     [characters]
   );
 
@@ -166,7 +212,7 @@ function AdminProductsPage() {
       personajes: normalizePersonajesFromProduct(product),
       material: product.material || "",
       precio: getProductPrice(product),
-      stock: product.stock || "",
+      stock: getStockInputFromProduct(product),
       tamano: product.tamano || "",
       estado: product.estado || "Activo",
       adulto: Boolean(product.adulto)
@@ -219,6 +265,7 @@ function AdminProductsPage() {
 
     try {
       const preparedImages = await prepareProductImagesForSave(images);
+      const stockData = parseStockOrAvailability(form.stock);
 
       const personajesNombre = Array.isArray(form.personajes)
         ? form.personajes.filter(Boolean)
@@ -251,15 +298,15 @@ function AdminProductsPage() {
         price: Number(form.precio),
         precioReferencial: Number(form.precio),
 
-        stock: Number(form.stock || 0),
+        stock: stockData.stock,
+        tiempoEstimado: stockData.tiempoEstimado,
         estado: form.estado,
-
         disponibilidad:
           form.estado === "Preventa"
             ? "preventa"
             : form.estado === "Agotado"
             ? "agotado"
-            : "stock",
+            : stockData.disponibilidad,
 
         adulto: Boolean(form.adulto),
         imagenes: preparedImages,
@@ -282,7 +329,7 @@ function AdminProductsPage() {
 
       resetForm();
       setView("list");
-      await refreshProducts();
+      await refreshProducts?.();
     } catch (error) {
       setMessage(
         error.message ||
@@ -303,7 +350,7 @@ function AdminProductsPage() {
       );
 
       await toggleProductStatus(getProductId(product));
-      await refreshProducts();
+      await refreshProducts?.();
 
       setMessage(
         product.activo
@@ -311,9 +358,7 @@ function AdminProductsPage() {
           : "Producto activado correctamente."
       );
     } catch (error) {
-      setMessage(
-        error.message || "No se pudo cambiar el estado del producto."
-      );
+      setMessage(error.message || "No se pudo cambiar el estado del producto.");
     } finally {
       setIsSaving(false);
     }
@@ -420,7 +465,7 @@ function AdminProductsPage() {
               </thead>
 
               <tbody>
-                {products.map((product) => {
+                {(products || []).map((product) => {
                   const productId = getProductId(product);
 
                   return (
@@ -449,7 +494,7 @@ function AdminProductsPage() {
                             </p>
 
                             <p className="mt-1 text-xs text-gray-500">
-                              Stock: {product.stock || 0} ·{" "}
+                              {getAvailabilitySummary(product)} ·{" "}
                               {product.estado || "Activo"}
                             </p>
                           </div>
@@ -503,7 +548,7 @@ function AdminProductsPage() {
                   );
                 })}
 
-                {products.length === 0 && (
+                {(!products || products.length === 0) && (
                   <tr>
                     <td
                       colSpan="6"
@@ -549,7 +594,10 @@ function AdminProductsPage() {
                 >
                   <option value="">Seleccionar serie</option>
                   {activeSeries.map((item) => (
-                    <option key={item.id || item.slug} value={item.nombre}>
+                    <option
+                      key={item.id || item.slug || item.nombre}
+                      value={item.nombre}
+                    >
                       {item.nombre}
                     </option>
                   ))}
@@ -586,7 +634,7 @@ function AdminProductsPage() {
                   <option value="">Sin evento</option>
                   {activeEvents.map((eventItem) => (
                     <option
-                      key={eventItem.id || eventItem.slug}
+                      key={eventItem.id || eventItem.slug || eventItem.nombre}
                       value={eventItem.nombre}
                     >
                       {eventItem.nombre}
@@ -618,7 +666,7 @@ function AdminProductsPage() {
               </div>
 
               <div>
-                <label className="text-sm font-black">Precio</label>
+                <label className="text-sm font-black">Precio referencial</label>
                 <input
                   name="precio"
                   type="number"
@@ -632,16 +680,22 @@ function AdminProductsPage() {
               </div>
 
               <div>
-                <label className="text-sm font-black">Stock</label>
+                <label className="text-sm font-black">
+                  Cantidad o disponibilidad
+                </label>
                 <input
                   name="stock"
-                  type="number"
-                  min="0"
+                  type="text"
                   value={form.stock}
                   onChange={handleChange}
                   className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                  placeholder="10"
+                  placeholder="15 o Disponibilidad por confirmar con Smika Store 💖"
                 />
+                <p className="mt-2 text-xs leading-5 text-gray-500">
+                  Escribe un número si hay unidades exactas. Si no hay cantidad
+                  fija, escribe un mensaje como “Disponibilidad por confirmar
+                  con Smika Store 💖”.
+                </p>
               </div>
 
               <div>
