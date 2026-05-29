@@ -23,7 +23,7 @@ const initialForm = {
   serie: "",
   tipo: "",
   evento: "",
-  personaje: "",
+  personajes: [],
   material: "",
   precio: "",
   stock: "",
@@ -222,8 +222,8 @@ function AdminProductsPage() {
           form.estado === "Preventa"
             ? "preventa"
             : form.estado === "Agotado"
-            ? "agotado"
-            : "stock",
+              ? "agotado"
+              : "stock",
 
         adulto: Boolean(form.adulto),
         imagenes: preparedImages,
@@ -250,7 +250,7 @@ function AdminProductsPage() {
     } catch (error) {
       setMessage(
         error.message ||
-          "No se pudo guardar el producto. Revisa tu sesión de administrador o la conexión con el servidor."
+        "No se pudo guardar el producto. Revisa tu sesión de administrador o la conexión con el servidor."
       );
     } finally {
       setIsSaving(false);
@@ -720,8 +720,8 @@ function AdminProductsPage() {
               {isSaving
                 ? "Guardando..."
                 : editingProduct
-                ? "Guardar cambios"
-                : "Crear producto"}
+                  ? "Guardar cambios"
+                  : "Crear producto"}
             </button>
           </div>
         </form>
