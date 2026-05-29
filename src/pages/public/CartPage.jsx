@@ -33,6 +33,13 @@ function getProductPrice(product, item) {
   );
 }
 
+function formatMoney(value) {
+  return Number(value || 0).toLocaleString("es-PE", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2
+  });
+}
+
 function getRelatedName(value, fallback = "") {
   if (value && typeof value === "object") {
     return value.nombre || value.titulo || value.name || fallback || "";
@@ -64,8 +71,9 @@ function getProductImage(product) {
 function isAvailabilityByConfirmation(product) {
   const stock = Number(product?.stock || 0);
   const text = (product?.tiempoEstimado || "").trim();
+  const disponibilidad = (product?.disponibilidad || "").toString();
 
-  return stock <= 0 && Boolean(text);
+  return stock <= 0 && (Boolean(text) || disponibilidad === "por_pedido");
 }
 
 function getAvailabilityText(product) {
@@ -81,6 +89,16 @@ function getAvailabilityText(product) {
   if (stock > 0) return `${stock} disponibles`;
 
   return "Consultar disponibilidad";
+}
+
+function getCartItemSubtotal(product, item) {
+  const price = getProductPrice(product, item);
+
+  if (isAvailabilityByConfirmation(product)) {
+    return price;
+  }
+
+  return Number(item?.cantidad || 1) * price;
 }
 
 function CartPage() {
@@ -101,10 +119,7 @@ function CartPage() {
   const totalReferencial = useMemo(() => {
     return items.reduce((total, item) => {
       const product = item.producto;
-      const price = getProductPrice(product, item);
-      const quantity = Number(item.cantidad || 1);
-
-      return total + price * quantity;
+      return total + getCartItemSubtotal(product, item);
     }, 0);
   }, [items]);
 
@@ -266,7 +281,7 @@ function CartPage() {
               const productId = getProductId(product);
               const quantity = Number(item.cantidad || 1);
               const price = getProductPrice(product, item);
-              const subtotal = quantity * price;
+              const subtotal = getCartItemSubtotal(product, item);
               const image = getProductImage(product);
               const requiresConfirmation =
                 isAvailabilityByConfirmation(product);
@@ -327,12 +342,12 @@ function CartPage() {
                       <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
                         <div>
                           <p className="font-black">
-                            Precio referencial: S/ {price}
+                            Precio referencial: S/ {formatMoney(price)}
                           </p>
                           <p className="text-sm text-gray-500">
                             {requiresConfirmation
-                              ? `Subtotal referencial: S/ ${price}`
-                              : `Subtotal: S/ ${subtotal}`}
+                              ? `Subtotal referencial: S/ ${formatMoney(price)}`
+                              : `Subtotal: S/ ${formatMoney(subtotal)}`}
                           </p>
                         </div>
 
@@ -399,7 +414,7 @@ function CartPage() {
 
               <div className="flex justify-between gap-4">
                 <span>Total referencial</span>
-                <strong>S/ {totalReferencial}</strong>
+                <strong>S/ {formatMoney(totalReferencial)}</strong>
               </div>
             </div>
 
