@@ -7,6 +7,27 @@ import {
   updateProduct as apiUpdateProduct
 } from "../services/productService";
 
+import {
+  createSeries as apiCreateSeries,
+  deleteSeries as apiDeleteSeries,
+  getSeries as apiGetSeries,
+  updateSeries as apiUpdateSeries
+} from "../services/seriesService";
+
+import {
+  createCharacter as apiCreateCharacter,
+  deleteCharacter as apiDeleteCharacter,
+  getCharacters as apiGetCharacters,
+  updateCharacter as apiUpdateCharacter
+} from "../services/characterService";
+
+import {
+  createEvent as apiCreateEvent,
+  deleteEvent as apiDeleteEvent,
+  getEvents as apiGetEvents,
+  updateEvent as apiUpdateEvent
+} from "../services/eventService";
+
 const AdminDataContext = createContext(null);
 
 const STORAGE_KEY = "smika_admin_data_v1";
@@ -24,6 +45,10 @@ function createSlug(text = "") {
 
 function isMongoObjectId(value) {
   return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
+}
+
+function getId(item) {
+  return item?._id || item?.id || "";
 }
 
 function getRelatedName(value, fallback = "") {
@@ -49,7 +74,7 @@ function normalizeEstadoToDisponibilidad(estado = "") {
 }
 
 function normalizeProductFromApi(product = {}) {
-  const mongoId = product._id || product.id || "";
+  const mongoId = getId(product);
 
   const serieNombre = getRelatedName(
     product.serie,
@@ -106,11 +131,17 @@ function normalizeProductFromApi(product = {}) {
       product.personajesNombre?.[0] ||
       "",
 
+    personajesNombre: Array.isArray(product.personajesNombre)
+      ? product.personajesNombre
+      : [],
+
     precio,
     price: precio,
     precioReferencial: precio,
 
     stock: Number(product.stock || 0),
+    tiempoEstimado: product.tiempoEstimado || "",
+
     estado: product.estado || "Activo",
     disponibilidad:
       product.disponibilidad ||
@@ -118,6 +149,155 @@ function normalizeProductFromApi(product = {}) {
 
     activo: product.activo !== false,
     imagenes: Array.isArray(product.imagenes) ? product.imagenes : []
+  };
+}
+
+function normalizeSeriesFromApi(serie = {}) {
+  const mongoId = getId(serie);
+
+  const categoriaNombre = getRelatedName(
+    serie.categoriaPrincipal,
+    serie.categoriaPrincipalNombre ||
+      serie.categoriaNombre ||
+      serie.categoria ||
+      "Series"
+  );
+
+  const origenNombre = getRelatedName(
+    serie.origen,
+    serie.origenNombre || serie.pais || "Variado"
+  );
+
+  return {
+    ...serie,
+
+    id: mongoId,
+    _id: mongoId,
+
+    nombre: serie.nombre || serie.name || "Serie Smika",
+    slug: serie.slug || createSlug(serie.nombre || mongoId),
+
+    descripcion: serie.descripcion || "",
+    imagen: serie.imagen || "",
+
+    categoria: categoriaNombre,
+    categoriaNombre,
+    categoriaPrincipalNombre: categoriaNombre,
+
+    subcategoriaNombre:
+      getRelatedName(serie.subcategoria, serie.subcategoriaNombre || "") || "",
+
+    origen: origenNombre,
+    origenNombre,
+
+    pais: serie.pais || "V",
+    tipo: serie.tipo || serie.categoria || "Historia",
+    genero: serie.genero || "",
+    autor:
+      serie.autor ||
+      serie.creadoresNombre?.join(", ") ||
+      serie.creadores?.map((creator) => creator.nombre).join(", ") ||
+      "",
+
+    creadoresNombre: Array.isArray(serie.creadoresNombre)
+      ? serie.creadoresNombre
+      : [],
+
+    destacada: Boolean(serie.destacada),
+    activa: serie.activa !== false && serie.activo !== false,
+    activo: serie.activa !== false && serie.activo !== false,
+
+    orden: Number(serie.orden || 0)
+  };
+}
+
+function normalizeCharacterFromApi(character = {}) {
+  const mongoId = getId(character);
+
+  const serieNombre = getRelatedName(
+    character.serie,
+    character.serieNombre || character.serieTexto || "Sin serie definida"
+  );
+
+  return {
+    ...character,
+
+    id: mongoId,
+    _id: mongoId,
+
+    nombre: character.nombre || character.name || "Personaje Smika",
+    slug: character.slug || createSlug(character.nombre || mongoId),
+
+    tipo: character.tipo || "Personaje",
+    descripcion: character.descripcion || "",
+    imagen: character.imagen || "",
+
+    serie: serieNombre,
+    serieNombre,
+
+    estado: character.estado || (character.needsReview ? "Faltan detalles" : "Completo"),
+    needsReview: Boolean(character.needsReview),
+
+    activo: character.activo !== false
+  };
+}
+
+function normalizeEventFromApi(event = {}) {
+  const mongoId = getId(event);
+
+  const titulo = event.titulo || event.nombre || event.name || "Evento Smika";
+
+  const serieNombre = getRelatedName(
+    event.serie,
+    event.serieNombre || event.serieTexto || ""
+  );
+
+  const categoriaNombre = getRelatedName(
+    event.categoria,
+    event.categoriaNombre || "Eventos"
+  );
+
+  const origenNombre = getRelatedName(
+    event.origen,
+    event.origenNombre || event.pais || "Variado"
+  );
+
+  return {
+    ...event,
+
+    id: mongoId,
+    _id: mongoId,
+
+    nombre: titulo,
+    titulo,
+    slug: event.slug || createSlug(titulo || mongoId),
+
+    descripcion: event.descripcion || "",
+    imagen: event.imagen || "",
+    imagenes: Array.isArray(event.imagenes) ? event.imagenes : [],
+
+    categoria: categoriaNombre,
+    categoriaNombre,
+
+    serie: serieNombre,
+    serieNombre,
+
+    origen: origenNombre,
+    origenNombre,
+
+    pais: event.pais || "V",
+    tipo: event.tipo || event.tipoEvento || "Otro",
+    tipoEvento: event.tipoEvento || event.tipo || "Otro",
+
+    fechaInicio: event.fechaInicio || "",
+    fechaFin: event.fechaFin || "",
+
+    estado: event.estado || "proximo",
+    destacado: Boolean(event.destacado),
+
+    productos: Array.isArray(event.productos) ? event.productos : [],
+
+    activo: event.activo !== false
   };
 }
 
@@ -175,7 +355,10 @@ function buildProductPayloadForApi(payload = {}) {
       ? payload.origenNombre || ""
       : origenValue,
 
-    personajes: Array.isArray(payload.personajes) ? payload.personajes : [],
+    personajes: Array.isArray(payload.personajes)
+      ? payload.personajes.filter(isMongoObjectId)
+      : [],
+
     personajesNombre: Array.isArray(payload.personajesNombre)
       ? payload.personajesNombre
       : payload.personaje
@@ -211,128 +394,142 @@ function buildProductPayloadForApi(payload = {}) {
   };
 }
 
+function buildSeriesPayloadForApi(payload = {}) {
+  return {
+    nombre: payload.nombre || payload.name || "",
+    descripcion: payload.descripcion || "",
+    imagen: payload.imagen || "",
+
+    categoriaPrincipal: isMongoObjectId(payload.categoriaPrincipal)
+      ? payload.categoriaPrincipal
+      : "",
+
+    categoriaPrincipalNombre:
+      payload.categoriaPrincipalNombre ||
+      payload.categoriaNombre ||
+      payload.categoria ||
+      "Series",
+
+    subcategoria: isMongoObjectId(payload.subcategoria)
+      ? payload.subcategoria
+      : "",
+
+    subcategoriaNombre: payload.subcategoriaNombre || "",
+
+    origen: isMongoObjectId(payload.origen) ? payload.origen : "",
+    origenNombre:
+      payload.origenNombre || payload.paisNombre || payload.origen || "Variado",
+
+    pais: payload.pais || "V",
+
+    creadores: Array.isArray(payload.creadores)
+      ? payload.creadores.filter(isMongoObjectId)
+      : [],
+
+    creadoresNombre: Array.isArray(payload.creadoresNombre)
+      ? payload.creadoresNombre
+      : payload.autor
+      ? [payload.autor]
+      : [],
+
+    destacada: Boolean(payload.destacada),
+    activa:
+      payload.activa !== undefined
+        ? Boolean(payload.activa)
+        : payload.activo !== undefined
+        ? Boolean(payload.activo)
+        : true,
+
+    activo:
+      payload.activo !== undefined
+        ? Boolean(payload.activo)
+        : payload.activa !== undefined
+        ? Boolean(payload.activa)
+        : true,
+
+    orden:
+      payload.orden !== undefined && payload.orden !== ""
+        ? Number(payload.orden)
+        : 0
+  };
+}
+
+function buildCharacterPayloadForApi(payload = {}) {
+  const serieValue = payload.serie || payload.serieNombre || "";
+
+  return {
+    nombre: payload.nombre || payload.name || "",
+    tipo: payload.tipo || "Personaje",
+    descripcion: payload.descripcion || "",
+    imagen: payload.imagen || "",
+
+    serie: isMongoObjectId(serieValue) ? serieValue : "",
+    serieNombre: isMongoObjectId(serieValue)
+      ? payload.serieNombre || ""
+      : serieValue || "Sin serie definida",
+
+    estado: payload.estado || (payload.needsReview ? "Faltan detalles" : "Completo"),
+    needsReview: Boolean(payload.needsReview),
+
+    activo:
+      payload.activo !== undefined ? Boolean(payload.activo) : true
+  };
+}
+
+function buildEventPayloadForApi(payload = {}) {
+  const titulo = payload.titulo || payload.nombre || payload.name || "";
+  const serieValue = payload.serie || payload.serieNombre || "";
+  const categoriaValue = payload.categoria || payload.categoriaNombre || "";
+  const origenValue = payload.origen || payload.origenNombre || payload.pais || "";
+
+  return {
+    titulo,
+    nombre: titulo,
+    descripcion: payload.descripcion || "",
+    imagen: payload.imagen || "",
+
+    imagenes: Array.isArray(payload.imagenes) ? payload.imagenes : [],
+
+    categoria: isMongoObjectId(categoriaValue) ? categoriaValue : "",
+    categoriaNombre: isMongoObjectId(categoriaValue)
+      ? payload.categoriaNombre || ""
+      : categoriaValue || "Eventos",
+
+    serie: isMongoObjectId(serieValue) ? serieValue : "",
+    serieNombre: isMongoObjectId(serieValue)
+      ? payload.serieNombre || ""
+      : serieValue,
+
+    origen: isMongoObjectId(origenValue) ? origenValue : "",
+    origenNombre: isMongoObjectId(origenValue)
+      ? payload.origenNombre || ""
+      : origenValue || "Variado",
+
+    pais: payload.pais || "V",
+
+    tipoEvento: payload.tipoEvento || payload.tipo || "Otro",
+
+    fechaInicio: payload.fechaInicio || null,
+    fechaFin: payload.fechaFin || null,
+
+    estado: payload.estado || "proximo",
+    destacado: Boolean(payload.destacado),
+
+    productos: Array.isArray(payload.productos)
+      ? payload.productos.filter(isMongoObjectId)
+      : [],
+
+    activo:
+      payload.activo !== undefined ? Boolean(payload.activo) : true
+  };
+}
+
 const defaultAdminData = {
   products: [],
-
-  events: [
-    {
-      id: 1,
-      nombre: "Evento café",
-      slug: "evento-cafe",
-      estado: "Actual",
-      activo: true
-    },
-    {
-      id: 2,
-      nombre: "Pop up especial",
-      slug: "pop-up-especial",
-      estado: "Próximo",
-      activo: true
-    },
-    {
-      id: 3,
-      nombre: "Lebom",
-      slug: "lebom",
-      estado: "Próximo",
-      activo: true
-    }
-  ],
-
-  series: [
-    {
-      id: 1,
-      nombre: "La Ventura del Caballero Blanco",
-      slug: "la-ventura-del-caballero-blanco",
-      pais: "CN",
-      categoria: "Manhua",
-      activo: true
-    },
-    {
-      id: 2,
-      nombre: "Tian Guan Ci Fu",
-      slug: "tian-guan-ci-fu",
-      pais: "CN",
-      categoria: "Novela / Manhua",
-      activo: true
-    },
-    {
-      id: 3,
-      nombre: "Jinx",
-      slug: "jinx",
-      pais: "KR",
-      categoria: "Manhwa",
-      activo: true
-    },
-    {
-      id: 4,
-      nombre: "Solo Leveling",
-      slug: "solo-leveling",
-      pais: "KR",
-      categoria: "Manhwa",
-      activo: true
-    },
-    {
-      id: 5,
-      nombre: "Variado",
-      slug: "variado",
-      pais: "V",
-      categoria: "Variado",
-      activo: true
-    }
-  ],
-
-  characters: [
-    {
-      id: 1,
-      nombre: "Shuraka",
-      serie: "La Ventura del Caballero Blanco",
-      descripcion: "",
-      estado: "Completo",
-      needsReview: false,
-      activo: true
-    },
-    {
-      id: 2,
-      nombre: "Xie Lian",
-      serie: "Tian Guan Ci Fu",
-      descripcion: "",
-      estado: "Completo",
-      needsReview: false,
-      activo: true
-    },
-    {
-      id: 3,
-      nombre: "Hua Cheng",
-      serie: "Tian Guan Ci Fu",
-      descripcion: "",
-      estado: "Completo",
-      needsReview: false,
-      activo: true
-    }
-  ],
-
-  users: [
-    {
-      id: 1,
-      nombre: "Smika Support",
-      apellido: "Admin",
-      alias: "smika-admin",
-      correo: "soporte.smika@gmail.com",
-      email: "soporte.smika@gmail.com",
-      role: "admin",
-      activo: true
-    },
-    {
-      id: 2,
-      nombre: "Subadmin",
-      apellido: "Smika",
-      alias: "subadmin-smika",
-      correo: "subadmin@smika.local",
-      email: "subadmin@smika.local",
-      role: "subadmin",
-      activo: true
-    }
-  ]
+  series: [],
+  events: [],
+  characters: [],
+  users: []
 };
 
 function getInitialAdminData() {
@@ -346,16 +543,10 @@ function getInitialAdminData() {
     return {
       ...defaultAdminData,
       ...parsedData,
-
-      // Importante:
-      // No recupero productos locales antiguos.
-      // Los productos ahora deben venir desde MongoDB.
       products: [],
-
-      events: parsedData.events || defaultAdminData.events,
-      series: parsedData.series || defaultAdminData.series,
-      characters: parsedData.characters || defaultAdminData.characters,
-      users: parsedData.users || defaultAdminData.users
+      series: [],
+      events: [],
+      characters: []
     };
   } catch (error) {
     console.error("No se pudo leer la información local de Smika.", error);
@@ -366,8 +557,16 @@ function getInitialAdminData() {
 export function AdminDataProvider({ children }) {
   const [adminData, setAdminData] = useState(getInitialAdminData);
   const [storageError, setStorageError] = useState("");
+
   const [productLoadError, setProductLoadError] = useState("");
+  const [seriesLoadError, setSeriesLoadError] = useState("");
+  const [charactersLoadError, setCharactersLoadError] = useState("");
+  const [eventsLoadError, setEventsLoadError] = useState("");
+
   const [loadingProducts, setLoadingProducts] = useState(false);
+  const [loadingSeries, setLoadingSeries] = useState(false);
+  const [loadingCharacters, setLoadingCharacters] = useState(false);
+  const [loadingEvents, setLoadingEvents] = useState(false);
 
   const updateCollection = (collectionName, updater) => {
     setAdminData((currentData) => {
@@ -393,7 +592,6 @@ export function AdminDataProvider({ children }) {
       });
 
       const productsFromApi = data.products || data.productos || data.data || [];
-
       const normalizedProducts = productsFromApi
         .map(normalizeProductFromApi)
         .filter((product) => isMongoObjectId(product._id || product.id));
@@ -403,8 +601,7 @@ export function AdminDataProvider({ children }) {
       return normalizedProducts;
     } catch (error) {
       setProductLoadError(
-        error.message ||
-          "No se pudieron cargar los productos desde MongoDB."
+        error.message || "No se pudieron cargar los productos desde MongoDB."
       );
 
       return [];
@@ -413,19 +610,118 @@ export function AdminDataProvider({ children }) {
     }
   };
 
+  const refreshSeries = async () => {
+    setLoadingSeries(true);
+    setSeriesLoadError("");
+
+    try {
+      const data = await apiGetSeries({
+        activos: "false"
+      });
+
+      const seriesFromApi = data.series || data.data || [];
+      const normalizedSeries = seriesFromApi
+        .map(normalizeSeriesFromApi)
+        .filter((serie) => isMongoObjectId(serie._id || serie.id));
+
+      updateCollection("series", normalizedSeries);
+
+      return normalizedSeries;
+    } catch (error) {
+      setSeriesLoadError(
+        error.message || "No se pudieron cargar las series desde MongoDB."
+      );
+
+      return [];
+    } finally {
+      setLoadingSeries(false);
+    }
+  };
+
+  const refreshCharacters = async () => {
+    setLoadingCharacters(true);
+    setCharactersLoadError("");
+
+    try {
+      const data = await apiGetCharacters({
+        activos: "false"
+      });
+
+      const charactersFromApi = data.characters || data.data || [];
+      const normalizedCharacters = charactersFromApi
+        .map(normalizeCharacterFromApi)
+        .filter((character) => isMongoObjectId(character._id || character.id));
+
+      updateCollection("characters", normalizedCharacters);
+
+      return normalizedCharacters;
+    } catch (error) {
+      setCharactersLoadError(
+        error.message || "No se pudieron cargar los personajes desde MongoDB."
+      );
+
+      return [];
+    } finally {
+      setLoadingCharacters(false);
+    }
+  };
+
+  const refreshEvents = async () => {
+    setLoadingEvents(true);
+    setEventsLoadError("");
+
+    try {
+      const data = await apiGetEvents({
+        activos: "false"
+      });
+
+      const eventsFromApi = data.events || data.eventos || data.data || [];
+      const normalizedEvents = eventsFromApi
+        .map(normalizeEventFromApi)
+        .filter((event) => isMongoObjectId(event._id || event.id));
+
+      updateCollection("events", normalizedEvents);
+
+      return normalizedEvents;
+    } catch (error) {
+      setEventsLoadError(
+        error.message || "No se pudieron cargar los eventos desde MongoDB."
+      );
+
+      return [];
+    } finally {
+      setLoadingEvents(false);
+    }
+  };
+
+  const refreshAdminData = async () => {
+    await Promise.all([
+      refreshProducts(),
+      refreshSeries(),
+      refreshCharacters(),
+      refreshEvents()
+    ]);
+  };
+
   useEffect(() => {
-    refreshProducts();
+    refreshAdminData();
   }, []);
 
   useEffect(() => {
     try {
       const dataToStore = {
         ...adminData,
-
-        // No guardo productos locales como fuente principal.
-        // La fuente real del catálogo es MongoDB.
         products: adminData.products.filter((product) =>
           isMongoObjectId(product._id || product.id)
+        ),
+        series: adminData.series.filter((serie) =>
+          isMongoObjectId(serie._id || serie.id)
+        ),
+        events: adminData.events.filter((event) =>
+          isMongoObjectId(event._id || event.id)
+        ),
+        characters: adminData.characters.filter((character) =>
+          isMongoObjectId(character._id || character.id)
         )
       };
 
@@ -441,7 +737,6 @@ export function AdminDataProvider({ children }) {
 
   const createProduct = async (payload) => {
     const apiPayload = buildProductPayloadForApi(payload);
-
     const data = await apiCreateProduct(apiPayload);
     const createdProduct = normalizeProductFromApi(data.product);
 
@@ -468,7 +763,6 @@ export function AdminDataProvider({ children }) {
     }
 
     const apiPayload = buildProductPayloadForApi(payload);
-
     const data = await apiUpdateProduct(productId, apiPayload);
     const updatedProduct = normalizeProductFromApi(data.product);
 
@@ -518,8 +812,7 @@ export function AdminDataProvider({ children }) {
     const enabledPayload = buildProductPayloadForApi({
       ...product,
       activo: true,
-      estado: "Activo",
-      disponibilidad: "stock"
+      estado: "Activo"
     });
 
     const data = await apiUpdateProduct(productId, enabledPayload);
@@ -534,8 +827,81 @@ export function AdminDataProvider({ children }) {
     return enabledProduct;
   };
 
-  const createCharacterQuick = ({ name, serie = "" }) => {
-    const cleanName = name.trim();
+  const createSeriesFull = async (payload) => {
+    const apiPayload = buildSeriesPayloadForApi(payload);
+    const data = await apiCreateSeries(apiPayload);
+    const createdSeries = normalizeSeriesFromApi(data.serie);
+
+    updateCollection("series", (currentSeries) => [
+      createdSeries,
+      ...currentSeries.filter(
+        (serie) => (serie._id || serie.id) !== (createdSeries._id || createdSeries.id)
+      )
+    ]);
+
+    return createdSeries;
+  };
+
+  const updateSeriesFull = async (seriesId, payload) => {
+    const apiPayload = buildSeriesPayloadForApi(payload);
+    const data = await apiUpdateSeries(seriesId, apiPayload);
+    const updatedSeries = normalizeSeriesFromApi(data.serie);
+
+    updateCollection("series", (currentSeries) =>
+      currentSeries.map((serie) =>
+        (serie._id || serie.id) === seriesId ? updatedSeries : serie
+      )
+    );
+
+    return updatedSeries;
+  };
+
+  const toggleSeriesStatus = async (seriesId) => {
+    const serie = adminData.series.find(
+      (item) => (item._id || item.id) === seriesId
+    );
+
+    if (!serie) {
+      throw new Error("Serie no encontrada.");
+    }
+
+    if (serie.activo) {
+      await apiDeleteSeries(seriesId);
+
+      const disabledSeries = {
+        ...serie,
+        activo: false,
+        activa: false
+      };
+
+      updateCollection("series", (currentSeries) =>
+        currentSeries.map((item) =>
+          (item._id || item.id) === seriesId ? disabledSeries : item
+        )
+      );
+
+      return disabledSeries;
+    }
+
+    const data = await apiUpdateSeries(seriesId, {
+      ...buildSeriesPayloadForApi(serie),
+      activo: true,
+      activa: true
+    });
+
+    const enabledSeries = normalizeSeriesFromApi(data.serie);
+
+    updateCollection("series", (currentSeries) =>
+      currentSeries.map((item) =>
+        (item._id || item.id) === seriesId ? enabledSeries : item
+      )
+    );
+
+    return enabledSeries;
+  };
+
+  const createCharacterQuick = async ({ name, serie = "" }) => {
+    const cleanName = name?.trim();
     const cleanSerie = serie?.trim() || "Sin serie definida";
 
     if (!cleanName) return null;
@@ -548,103 +914,237 @@ export function AdminDataProvider({ children }) {
 
     if (existingCharacter) return existingCharacter;
 
-    const newCharacter = {
-      id: Date.now(),
-      nombre: cleanName,
-      serie: cleanSerie,
-      descripcion:
-        "Personaje agregado rápidamente desde un producto. Falta completar sus detalles.",
-      estado: "Faltan detalles",
-      needsReview: true,
-      activo: true,
-      createdAt: new Date().toISOString()
-    };
+    const data = await apiCreateCharacter(
+      buildCharacterPayloadForApi({
+        nombre: cleanName,
+        serie: cleanSerie,
+        serieNombre: cleanSerie,
+        descripcion:
+          "Personaje agregado rápidamente desde un producto. Falta completar sus detalles.",
+        estado: "Faltan detalles",
+        needsReview: true,
+        activo: true
+      })
+    );
+
+    const createdCharacter = normalizeCharacterFromApi(data.character);
 
     updateCollection("characters", (currentCharacters) => [
-      newCharacter,
-      ...currentCharacters
+      createdCharacter,
+      ...currentCharacters.filter(
+        (character) =>
+          (character._id || character.id) !==
+          (createdCharacter._id || createdCharacter.id)
+      )
     ]);
 
-    return newCharacter;
+    return createdCharacter;
   };
 
-  const createCharacterFull = (payload) => {
-    const newCharacter = {
-      id: Date.now(),
-      nombre: payload.nombre,
-      serie: payload.serie || "Sin serie definida",
-      descripcion: payload.descripcion || "",
-      estado: payload.estado || "Completo",
-      needsReview: payload.needsReview ?? false,
-      activo: payload.activo ?? true,
-      createdAt: new Date().toISOString()
-    };
+  const createCharacterFull = async (payload) => {
+    const apiPayload = buildCharacterPayloadForApi(payload);
+    const data = await apiCreateCharacter(apiPayload);
+    const createdCharacter = normalizeCharacterFromApi(data.character);
 
     updateCollection("characters", (currentCharacters) => [
-      newCharacter,
-      ...currentCharacters
+      createdCharacter,
+      ...currentCharacters.filter(
+        (character) =>
+          (character._id || character.id) !==
+          (createdCharacter._id || createdCharacter.id)
+      )
     ]);
 
-    return newCharacter;
+    return createdCharacter;
   };
 
-  const updateCharacter = (characterId, payload) => {
+  const updateCharacter = async (characterId, payload) => {
+    const apiPayload = buildCharacterPayloadForApi(payload);
+    const data = await apiUpdateCharacter(characterId, apiPayload);
+    const updatedCharacter = normalizeCharacterFromApi(data.character);
+
     updateCollection("characters", (currentCharacters) =>
       currentCharacters.map((character) =>
-        character.id === characterId
-          ? {
-              ...character,
-              ...payload,
-              updatedAt: new Date().toISOString()
-            }
+        (character._id || character.id) === characterId
+          ? updatedCharacter
           : character
       )
     );
+
+    return updatedCharacter;
   };
 
-  const toggleCharacterStatus = (characterId) => {
+  const toggleCharacterStatus = async (characterId) => {
+    const character = adminData.characters.find(
+      (item) => (item._id || item.id) === characterId
+    );
+
+    if (!character) {
+      throw new Error("Personaje no encontrado.");
+    }
+
+    if (character.activo) {
+      await apiDeleteCharacter(characterId);
+
+      const disabledCharacter = {
+        ...character,
+        activo: false
+      };
+
+      updateCollection("characters", (currentCharacters) =>
+        currentCharacters.map((item) =>
+          (item._id || item.id) === characterId ? disabledCharacter : item
+        )
+      );
+
+      return disabledCharacter;
+    }
+
+    const data = await apiUpdateCharacter(characterId, {
+      ...buildCharacterPayloadForApi(character),
+      activo: true
+    });
+
+    const enabledCharacter = normalizeCharacterFromApi(data.character);
+
     updateCollection("characters", (currentCharacters) =>
-      currentCharacters.map((character) =>
-        character.id === characterId
-          ? {
-              ...character,
-              activo: !character.activo
-            }
-          : character
+      currentCharacters.map((item) =>
+        (item._id || item.id) === characterId ? enabledCharacter : item
       )
     );
+
+    return enabledCharacter;
+  };
+
+  const createEventFull = async (payload) => {
+    const apiPayload = buildEventPayloadForApi(payload);
+    const data = await apiCreateEvent(apiPayload);
+    const createdEvent = normalizeEventFromApi(data.event);
+
+    updateCollection("events", (currentEvents) => [
+      createdEvent,
+      ...currentEvents.filter(
+        (event) => (event._id || event.id) !== (createdEvent._id || createdEvent.id)
+      )
+    ]);
+
+    return createdEvent;
+  };
+
+  const updateEventFull = async (eventId, payload) => {
+    const apiPayload = buildEventPayloadForApi(payload);
+    const data = await apiUpdateEvent(eventId, apiPayload);
+    const updatedEvent = normalizeEventFromApi(data.event);
+
+    updateCollection("events", (currentEvents) =>
+      currentEvents.map((event) =>
+        (event._id || event.id) === eventId ? updatedEvent : event
+      )
+    );
+
+    return updatedEvent;
+  };
+
+  const toggleEventStatus = async (eventId) => {
+    const event = adminData.events.find(
+      (item) => (item._id || item.id) === eventId
+    );
+
+    if (!event) {
+      throw new Error("Evento no encontrado.");
+    }
+
+    if (event.activo) {
+      await apiDeleteEvent(eventId);
+
+      const disabledEvent = {
+        ...event,
+        activo: false
+      };
+
+      updateCollection("events", (currentEvents) =>
+        currentEvents.map((item) =>
+          (item._id || item.id) === eventId ? disabledEvent : item
+        )
+      );
+
+      return disabledEvent;
+    }
+
+    const data = await apiUpdateEvent(eventId, {
+      ...buildEventPayloadForApi(event),
+      activo: true
+    });
+
+    const enabledEvent = normalizeEventFromApi(data.event);
+
+    updateCollection("events", (currentEvents) =>
+      currentEvents.map((item) =>
+        (item._id || item.id) === eventId ? enabledEvent : item
+      )
+    );
+
+    return enabledEvent;
   };
 
   const value = useMemo(
     () => ({
       storageError,
+
       productLoadError,
+      seriesLoadError,
+      charactersLoadError,
+      eventsLoadError,
+
       loadingProducts,
+      loadingSeries,
+      loadingCharacters,
+      loadingEvents,
 
       products: adminData.products,
-      events: adminData.events,
       series: adminData.series,
+      events: adminData.events,
       characters: adminData.characters,
       users: adminData.users,
 
+      refreshAdminData,
       refreshProducts,
+      refreshSeries,
+      refreshCharacters,
+      refreshEvents,
 
       createProduct,
       updateProduct,
       toggleProductStatus,
+
+      createSeriesFull,
+      updateSeriesFull,
+      toggleSeriesStatus,
 
       createCharacterQuick,
       createCharacterFull,
       updateCharacter,
       toggleCharacterStatus,
 
-      setProducts: (updater) => updateCollection("products", updater),
-      setEvents: (updater) => updateCollection("events", updater),
-      setSeries: (updater) => updateCollection("series", updater),
-      setCharacters: (updater) => updateCollection("characters", updater),
-      setUsers: (updater) => updateCollection("users", updater)
+      createEventFull,
+      updateEventFull,
+      toggleEventStatus
     }),
-    [adminData, storageError, productLoadError, loadingProducts]
+    [
+      storageError,
+
+      productLoadError,
+      seriesLoadError,
+      charactersLoadError,
+      eventsLoadError,
+
+      loadingProducts,
+      loadingSeries,
+      loadingCharacters,
+      loadingEvents,
+
+      adminData
+    ]
   );
 
   return (
@@ -658,7 +1158,7 @@ export function useAdminData() {
   const context = useContext(AdminDataContext);
 
   if (!context) {
-    throw new Error("useAdminData debe usarse dentro de AdminDataProvider.");
+    throw new Error("useAdminData debe usarse dentro de AdminDataProvider");
   }
 
   return context;
