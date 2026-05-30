@@ -28,6 +28,13 @@ import {
   updateCharacter as apiUpdateCharacter
 } from "../services/characterService";
 
+import {
+  createCategory as apiCreateCategory,
+  deleteCategory as apiDeleteCategory,
+  getCategories as apiGetCategories,
+  updateCategory as apiUpdateCategory
+} from "../services/categoryService";
+
 const AdminDataContext = createContext(null);
 
 const STORAGE_KEY = "smika_admin_data_v1";
@@ -65,6 +72,16 @@ function getTextValue(...values) {
   return found ? found.toString().trim() : "";
 }
 
+function getRelatedName(value, fallback = "") {
+  if (value && typeof value === "object") {
+    return value.nombre || value.titulo || value.name || fallback || "";
+  }
+
+  if (isMongoObjectId(value)) return fallback || "";
+
+  return value || fallback || "";
+}
+
 function getImageSource(image) {
   if (!image) return "";
 
@@ -94,7 +111,6 @@ function normalizeImageList(images = []) {
     .filter(Boolean)
     .filter((image) => {
       if (seenImages.has(image)) return false;
-
       seenImages.add(image);
       return true;
     });
@@ -136,14 +152,25 @@ function shouldSendImages(payload = {}, includeImages = false) {
   );
 }
 
-function getRelatedName(value, fallback = "") {
-  if (value && typeof value === "object") {
-    return value.nombre || value.titulo || value.name || fallback || "";
-  }
+function normalizeCategoryFromApi(category = {}) {
+  const mongoId = getId(category);
 
-  if (isMongoObjectId(value)) return fallback || "";
-
-  return value || fallback || "";
+  return {
+    ...category,
+    id: mongoId,
+    _id: mongoId,
+    nombre: category.nombre || category.name || "Categoría",
+    slug: category.slug || createSlug(category.nombre || mongoId),
+    descripcion: category.descripcion || "",
+    tipo: category.tipo || "principal",
+    categoriaPadre: category.categoriaPadre || null,
+    categoriaPadreNombre:
+      category.categoriaPadre?.nombre || category.categoriaPadreNombre || "",
+    imagen: category.imagen || "",
+    orden: Number(category.orden || 0),
+    activa: category.activa !== false,
+    activo: category.activa !== false
+  };
 }
 
 function normalizeProductFromApi(product = {}) {
@@ -163,6 +190,11 @@ function normalizeProductFromApi(product = {}) {
     product.categoria,
     product.categoriaNombre || product.category || ""
   );
+
+  const categoriaId =
+    typeof product.categoria === "string"
+      ? product.categoria
+      : getId(product.categoria);
 
   const origenNombre = getRelatedName(
     product.origen,
@@ -189,6 +221,7 @@ function normalizeProductFromApi(product = {}) {
     eventoNombre,
 
     categoria: categoriaNombre,
+    categoriaId,
     categoriaNombre,
 
     origen: origenNombre,
@@ -409,19 +442,44 @@ function normalizeCharacterFromApi(character = {}) {
   };
 }
 
+function buildCategoryPayloadForApi(payload = {}) {
+  return {
+    nombre: payload.nombre || "",
+    descripcion: payload.descripcion || "",
+    tipo: payload.tipo || "principal",
+    categoriaPadre: isMongoObjectId(payload.categoriaPadre)
+      ? payload.categoriaPadre
+      : "",
+    imagen: payload.imagen || "",
+    orden:
+      payload.orden !== undefined && payload.orden !== ""
+        ? Number(payload.orden)
+        : 0,
+    activa:
+      payload.activa !== undefined
+        ? Boolean(payload.activa)
+        : payload.activo !== undefined
+        ? Boolean(payload.activo)
+        : true
+  };
+}
+
 function buildProductPayloadForApi(payload = {}, options = {}) {
   const precio = Number(
     payload.precioReferencial ?? payload.precio ?? payload.price ?? 0
   );
 
   const estado = payload.estado || "Activo";
-
   const disponibilidad =
     payload.disponibilidad || normalizeEstadoToDisponibilidad(estado);
 
-  const serieValue = payload.serie || payload.serieNombre || "";
-  const eventoValue = payload.evento || payload.eventoNombre || "";
-  const categoriaValue = payload.categoria || payload.categoriaNombre || "";
+  const serieValue = payload.serieId || payload.serie || payload.serieNombre || "";
+  const eventoValue =
+    payload.eventoId || payload.evento || payload.eventoNombre || "";
+
+  const categoriaValue =
+    payload.categoriaId || payload.categoria || payload.categoriaNombre || "";
+
   const origenValue = payload.origen || payload.origenNombre || "Variado";
 
   const apiPayload = {
@@ -440,9 +498,12 @@ function buildProductPayloadForApi(payload = {}, options = {}) {
         : null,
 
     categoria: isMongoObjectId(categoriaValue) ? categoriaValue : "",
-    categoriaNombre: isMongoObjectId(categoriaValue)
-      ? payload.categoriaNombre || ""
-      : categoriaValue || "Productos",
+    categoriaNombre: payload.categoriaNombre || "",
+
+    subcategoria: isMongoObjectId(payload.subcategoria)
+      ? payload.subcategoria
+      : "",
+    subcategoriaNombre: payload.subcategoriaNombre || "",
 
     serie: isMongoObjectId(serieValue) ? serieValue : "",
     serieNombre: isMongoObjectId(serieValue)
@@ -646,6 +707,7 @@ const defaultAdminData = {
   events: [],
   series: [],
   characters: [],
+  categories: [],
   users: []
 };
 
@@ -663,7 +725,8 @@ function getInitialAdminData() {
       products: [],
       events: [],
       series: [],
-      characters: []
+      characters: [],
+      categories: []
     };
   } catch (error) {
     console.error("No se pudo leer la información local de Smika.", error);
@@ -679,11 +742,13 @@ export function AdminDataProvider({ children }) {
   const [seriesLoadError, setSeriesLoadError] = useState("");
   const [eventsLoadError, setEventsLoadError] = useState("");
   const [charactersLoadError, setCharactersLoadError] = useState("");
+  const [categoriesLoadError, setCategoriesLoadError] = useState("");
 
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingSeries, setLoadingSeries] = useState(false);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [loadingCharacters, setLoadingCharacters] = useState(false);
+  const [loadingCategories, setLoadingCategories] = useState(false);
 
   const updateCollection = (collectionName, updater) => {
     setAdminData((currentData) => {
@@ -803,12 +868,39 @@ export function AdminDataProvider({ children }) {
     }
   };
 
+  const refreshCategories = async () => {
+    setLoadingCategories(true);
+    setCategoriesLoadError("");
+
+    try {
+      const data = await apiGetCategories({
+        activos: "false"
+      });
+
+      const categoriesFromApi = data.categories || data.categorias || data.data || [];
+      const normalizedCategories = categoriesFromApi.map(normalizeCategoryFromApi);
+
+      updateCollection("categories", normalizedCategories);
+
+      return normalizedCategories;
+    } catch (error) {
+      setCategoriesLoadError(
+        error.message || "No se pudieron cargar las categorías desde MongoDB."
+      );
+
+      return [];
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+
   const refreshAdminData = async () => {
     await Promise.all([
       refreshProducts(),
       refreshSeries(),
       refreshEvents(),
-      refreshCharacters()
+      refreshCharacters(),
+      refreshCategories()
     ]);
   };
 
@@ -839,7 +931,9 @@ export function AdminDataProvider({ children }) {
     updateCollection("products", (currentProducts) => [
       createdProduct,
       ...currentProducts.filter(
-        (product) => (product._id || product.id) !== (createdProduct._id || createdProduct.id)
+        (product) =>
+          (product._id || product.id) !==
+          (createdProduct._id || createdProduct.id)
       )
     ]);
 
@@ -920,7 +1014,9 @@ export function AdminDataProvider({ children }) {
     updateCollection("series", (currentSeries) => [
       createdSeries,
       ...currentSeries.filter(
-        (serie) => (serie._id || serie.id) !== (createdSeries._id || createdSeries.id)
+        (serie) =>
+          (serie._id || serie.id) !==
+          (createdSeries._id || createdSeries.id)
       )
     ]);
 
@@ -1000,7 +1096,9 @@ export function AdminDataProvider({ children }) {
     updateCollection("events", (currentEvents) => [
       createdEvent,
       ...currentEvents.filter(
-        (event) => (event._id || event.id) !== (createdEvent._id || createdEvent.id)
+        (event) =>
+          (event._id || event.id) !==
+          (createdEvent._id || createdEvent.id)
       )
     ]);
 
@@ -1067,6 +1165,80 @@ export function AdminDataProvider({ children }) {
     return enabledEvent;
   };
 
+  const createCategoryFull = async (payload) => {
+    const apiPayload = buildCategoryPayloadForApi(payload);
+    const data = await apiCreateCategory(apiPayload);
+    const createdCategory = normalizeCategoryFromApi(data.category);
+
+    updateCollection("categories", (currentCategories) => [
+      createdCategory,
+      ...currentCategories.filter(
+        (category) =>
+          (category._id || category.id) !==
+          (createdCategory._id || createdCategory.id)
+      )
+    ]);
+
+    return createdCategory;
+  };
+
+  const updateCategory = async (categoryId, payload) => {
+    const apiPayload = buildCategoryPayloadForApi(payload);
+    const data = await apiUpdateCategory(categoryId, apiPayload);
+    const updatedCategory = normalizeCategoryFromApi(data.category);
+
+    updateCollection("categories", (currentCategories) =>
+      currentCategories.map((category) =>
+        (category._id || category.id) === categoryId
+          ? updatedCategory
+          : category
+      )
+    );
+
+    return updatedCategory;
+  };
+
+  const toggleCategoryStatus = async (categoryId) => {
+    const category = adminData.categories.find(
+      (item) => (item._id || item.id) === categoryId
+    );
+
+    if (!category) throw new Error("Categoría no encontrada.");
+
+    if (category.activa !== false) {
+      await apiDeleteCategory(categoryId);
+
+      const disabledCategory = {
+        ...category,
+        activa: false,
+        activo: false
+      };
+
+      updateCollection("categories", (currentCategories) =>
+        currentCategories.map((item) =>
+          (item._id || item.id) === categoryId ? disabledCategory : item
+        )
+      );
+
+      return disabledCategory;
+    }
+
+    const data = await apiUpdateCategory(categoryId, {
+      ...buildCategoryPayloadForApi(category),
+      activa: true
+    });
+
+    const enabledCategory = normalizeCategoryFromApi(data.category);
+
+    updateCollection("categories", (currentCategories) =>
+      currentCategories.map((item) =>
+        (item._id || item.id) === categoryId ? enabledCategory : item
+      )
+    );
+
+    return enabledCategory;
+  };
+
   const createCharacterQuick = async ({ name, serie = "" }) => {
     const cleanName = name?.trim();
     const cleanSerie = serie?.trim() || "Sin serie definida";
@@ -1096,7 +1268,9 @@ export function AdminDataProvider({ children }) {
     updateCollection("characters", (currentCharacters) => [
       createdCharacter,
       ...currentCharacters.filter(
-        (character) => (character._id || character.id) !== (createdCharacter._id || createdCharacter.id)
+        (character) =>
+          (character._id || character.id) !==
+          (createdCharacter._id || createdCharacter.id)
       )
     ]);
 
@@ -1110,7 +1284,9 @@ export function AdminDataProvider({ children }) {
     updateCollection("characters", (currentCharacters) => [
       createdCharacter,
       ...currentCharacters.filter(
-        (character) => (character._id || character.id) !== (createdCharacter._id || createdCharacter.id)
+        (character) =>
+          (character._id || character.id) !==
+          (createdCharacter._id || createdCharacter.id)
       )
     ]);
 
@@ -1180,16 +1356,19 @@ export function AdminDataProvider({ children }) {
       seriesLoadError,
       eventsLoadError,
       charactersLoadError,
+      categoriesLoadError,
 
       loadingProducts,
       loadingSeries,
       loadingEvents,
       loadingCharacters,
+      loadingCategories,
 
       products: adminData.products,
       events: adminData.events,
       series: adminData.series,
       characters: adminData.characters,
+      categories: adminData.categories,
       users: adminData.users,
 
       refreshAdminData,
@@ -1197,6 +1376,7 @@ export function AdminDataProvider({ children }) {
       refreshSeries,
       refreshEvents,
       refreshCharacters,
+      refreshCategories,
 
       createProduct,
       updateProduct,
@@ -1210,6 +1390,10 @@ export function AdminDataProvider({ children }) {
       updateEventFull,
       toggleEventStatus,
 
+      createCategoryFull,
+      updateCategory,
+      toggleCategoryStatus,
+
       createCharacterQuick,
       createCharacterFull,
       updateCharacter,
@@ -1219,6 +1403,7 @@ export function AdminDataProvider({ children }) {
       setEvents: (updater) => updateCollection("events", updater),
       setSeries: (updater) => updateCollection("series", updater),
       setCharacters: (updater) => updateCollection("characters", updater),
+      setCategories: (updater) => updateCollection("categories", updater),
       setUsers: (updater) => updateCollection("users", updater)
     }),
     [
@@ -1228,11 +1413,13 @@ export function AdminDataProvider({ children }) {
       seriesLoadError,
       eventsLoadError,
       charactersLoadError,
+      categoriesLoadError,
 
       loadingProducts,
       loadingSeries,
       loadingEvents,
       loadingCharacters,
+      loadingCategories,
 
       adminData
     ]

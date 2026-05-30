@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
+  Image as ImageIcon,
+  Loader2,
   Pencil,
   Plus,
   Power,
@@ -9,29 +11,26 @@ import {
   ShoppingBag
 } from "lucide-react";
 
-import FormSection from "../../components/admin/FormSection";
 import ImageDropzone from "../../components/admin/ImageDropzone";
-import SwitchInput from "../../components/admin/SwitchInput";
-import MultiCreatableSelect from "../../components/admin/MultiCreatableSelect";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
-
 import { useAdminData } from "../../context/AdminDataContext";
-import { prepareProductImagesForSave } from "../../utils/prepareProductImagesForSave";
-
-const DEFAULT_AVAILABILITY_TEXT = "Disponibilidad por confirmar con Smika Store 💖";
 
 const initialForm = {
   nombre: "",
+  categoriaId: "",
+  categoriaNombre: "",
   serie: "",
-  tipo: "",
   evento: "",
-  personajes: [],
+  tipo: "",
+  personajesNombre: [],
   material: "",
   precio: "",
   stock: "",
   tamano: "",
   estado: "Activo",
-  adulto: false
+  adulto: false,
+  esNuevo: true,
+  esDestacado: false
 };
 
 const productTypes = [
@@ -40,8 +39,20 @@ const productTypes = [
   "Photocard",
   "Tomo",
   "Merch",
-  "Pack"
+  "Pack",
+  "Llavero",
+  "Sticker",
+  "Print"
 ];
+
+function normalizeText(text = "") {
+  return text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
 function getProductId(product) {
   return product?._id || product?.id || "";
@@ -73,6 +84,120 @@ function getProductEvento(product) {
   return product?.eventoNombre || product?.evento || "";
 }
 
+function getProductCategory(product) {
+  if (product?.categoria && typeof product.categoria === "object") {
+    return {
+      id: product.categoria._id || product.categoria.id || "",
+      nombre: product.categoria.nombre || ""
+    };
+  }
+
+  return {
+    id: product?.categoriaId || "",
+    nombre: product?.categoriaNombre || product?.categoria || ""
+  };
+}
+
+function getImageSource(image) {
+  if (!image) return "";
+
+  if (typeof image === "string") return image;
+
+  if (typeof image === "object") {
+    return (
+      image.finalPreview ||
+      image.url ||
+      image.preview ||
+      image.src ||
+      image.imagen ||
+      ""
+    );
+  }
+
+  return "";
+}
+
+function getImageFile(image) {
+  if (!image || typeof image !== "object") return null;
+  return image.finalFile || image.file || null;
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(reader.result || "");
+    reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
+
+    reader.readAsDataURL(file);
+  });
+}
+
+async function imageToPersistedSource(image) {
+  const file = getImageFile(image);
+
+  if (file) {
+    const dataUrl = await fileToDataUrl(file);
+
+    return {
+      url: dataUrl,
+      preview: dataUrl,
+      finalPreview: dataUrl,
+      name: image.name || image.originalName || "imagen-producto.jpg",
+      originalName: image.originalName || image.name || "",
+      size: Number(image.size || 0),
+      finalSize: Number(image.finalSize || image.size || 0),
+      width: Number(image.width || 0),
+      height: Number(image.height || 0),
+      finalWidth: Number(image.finalWidth || 0),
+      finalHeight: Number(image.finalHeight || 0),
+      crop: image.crop || {
+        x: 0,
+        y: 0,
+        width: 100,
+        height: 100
+      },
+      zoom: Number(image.zoom || 1),
+      pan: image.pan || {
+        x: 0,
+        y: 0
+      },
+      storage: "local-data-url"
+    };
+  }
+
+  const source = getImageSource(image);
+
+  if (!source) return null;
+
+  if (typeof image === "object") {
+    return {
+      ...image,
+      url: source,
+      preview: image.preview || source,
+      finalPreview: image.finalPreview || source
+    };
+  }
+
+  return {
+    url: source,
+    preview: source,
+    finalPreview: source,
+    storage: source.startsWith("data:") ? "local-data-url" : "external"
+  };
+}
+
+async function prepareImagesForPayload(images = []) {
+  const preparedImages = await Promise.all(images.map(imageToPersistedSource));
+
+  return preparedImages.filter(Boolean);
+}
+
 function normalizePersonajesFromProduct(product) {
   if (Array.isArray(product?.personajesNombre)) {
     return product.personajesNombre.filter(Boolean);
@@ -81,7 +206,7 @@ function normalizePersonajesFromProduct(product) {
   if (Array.isArray(product?.personajes)) {
     return product.personajes
       .map((personaje) => {
-        if (personaje && typeof personaje === "object") {
+        if (typeof personaje === "object" && personaje !== null) {
           return personaje.nombre || personaje.name || "";
         }
 
@@ -107,48 +232,146 @@ function normalizePersonajesFromProduct(product) {
   return [];
 }
 
-function parseStockOrAvailability(value) {
-  const cleanValue =
-    value === undefined || value === null ? "" : value.toString().trim();
+function createEditableImageFromProduct(image, index = 0) {
+  const source = getImageSource(image);
 
-  const isNumeric = /^\d+$/.test(cleanValue);
-
-  if (isNumeric) {
-    return {
-      stock: Number(cleanValue),
-      tiempoEstimado: "",
-      disponibilidad: Number(cleanValue) > 0 ? "stock" : "por_pedido"
-    };
-  }
+  if (!source) return null;
 
   return {
-    stock: 0,
-    tiempoEstimado: cleanValue || DEFAULT_AVAILABILITY_TEXT,
-    disponibilidad: "por_pedido"
+    id: `product-image-${Date.now()}-${index}-${Math.random()}`,
+    name: image?.name || `imagen-producto-${index + 1}.jpg`,
+    originalName: image?.originalName || image?.name || "",
+    preview: image?.preview || source,
+    finalPreview: image?.finalPreview || source,
+    url: source,
+    size: Number(image?.size || 0),
+    originalSize: Number(image?.originalSize || image?.size || 0),
+    compressedSize: Number(image?.compressedSize || image?.size || 0),
+    finalSize: Number(image?.finalSize || image?.size || 0),
+    width: Number(image?.width || 1200),
+    height: Number(image?.height || 900),
+    finalWidth: Number(image?.finalWidth || 1200),
+    finalHeight: Number(image?.finalHeight || 900),
+    crop: image?.crop || {
+      x: 0,
+      y: 0,
+      width: 100,
+      height: 100
+    },
+    zoom: Number(image?.zoom || 1),
+    pan: image?.pan || {
+      x: 0,
+      y: 0
+    },
+    finalQuality: image?.finalQuality || 0.92,
+    finalType: image?.finalType || "image/jpeg",
+    finalCompressed: true,
+    storage: image?.storage || "existing"
   };
 }
 
-function getStockInputFromProduct(product) {
-  const stock = Number(product?.stock || 0);
-  const availabilityText = product?.tiempoEstimado || "";
+function MultiTextInput({
+  label,
+  values,
+  setValues,
+  options = [],
+  placeholder = "Escribe y agrega",
+  helperText = ""
+}) {
+  const [draft, setDraft] = useState("");
 
-  if (availabilityText && stock <= 0) return availabilityText;
+  const availableOptions = useMemo(() => {
+    return options.filter(
+      (option) =>
+        !values.some((value) => normalizeText(value) === normalizeText(option))
+    );
+  }, [options, values]);
 
-  return stock ? String(stock) : "";
-}
+  const addValue = (value) => {
+    const cleanValue = value.trim();
 
-function getAvailabilitySummary(product) {
-  const stock = Number(product?.stock || 0);
+    if (!cleanValue) return;
 
-  if (stock > 0) {
-    return `Cantidad disponible: ${stock}`;
-  }
+    setValues((currentValues) => {
+      const exists = currentValues.some(
+        (item) => normalizeText(item) === normalizeText(cleanValue)
+      );
 
-  if (product?.tiempoEstimado) {
-    return "Disponibilidad por confirmar";
-  }
+      if (exists) return currentValues;
 
-  return "Sin cantidad fija";
+      return [...currentValues, cleanValue];
+    });
+
+    setDraft("");
+  };
+
+  return (
+    <div className="rounded-[28px] bg-[#F8F6F7] p-5">
+      <p className="font-black">{label}</p>
+
+      {helperText && (
+        <p className="mt-1 text-sm text-gray-600 leading-6">{helperText}</p>
+      )}
+
+      <div className="mt-4 flex flex-col gap-3 md:flex-row">
+        <input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          className="w-full rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3 outline-none"
+          placeholder={placeholder}
+        />
+
+        <button
+          type="button"
+          onClick={() => addValue(draft)}
+          className="rounded-full bg-white px-5 py-3 text-sm font-black"
+        >
+          Agregar
+        </button>
+      </div>
+
+      {availableOptions.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {availableOptions.slice(0, 8).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => addValue(option)}
+              className="rounded-full bg-white px-3 py-1 text-xs font-black"
+            >
+              + {option}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {values.length > 0 && (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {values.map((value) => (
+            <span
+              key={value}
+              className="rounded-full bg-white px-4 py-2 text-sm font-black"
+            >
+              {value}
+              <button
+                type="button"
+                onClick={() =>
+                  setValues((currentValues) =>
+                    currentValues.filter(
+                      (item) => normalizeText(item) !== normalizeText(value)
+                    )
+                  )
+                }
+                className="ml-2 text-red-500"
+              >
+                ×
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function AdminProductsPage() {
@@ -157,84 +380,228 @@ function AdminProductsPage() {
     events,
     series,
     characters,
+    categories,
     storageError,
     productLoadError,
+    categoriesLoadError,
     loadingProducts,
     createProduct,
     updateProduct,
     toggleProductStatus,
     createCharacterQuick,
-    refreshProducts
+    createCategoryFull,
+    refreshProducts,
+    refreshCategories
   } = useAdminData();
 
   const [view, setView] = useState("list");
   const [form, setForm] = useState(initialForm);
   const [images, setImages] = useState([]);
+  const [imagesTouched, setImagesTouched] = useState(false);
   const [editingProduct, setEditingProduct] = useState(null);
   const [message, setMessage] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const activeSeries = useMemo(
-    () => (series || []).filter((item) => item.activo !== false),
-    [series]
-  );
+  const sortedProducts = useMemo(() => {
+    return [...(products || [])].sort((a, b) => {
+      if (a.activo !== b.activo) return a.activo ? -1 : 1;
+      return (a.nombre || "").localeCompare(b.nombre || "");
+    });
+  }, [products]);
 
-  const activeEvents = useMemo(
-    () => (events || []).filter((item) => item.activo !== false),
-    [events]
-  );
+  const activeCategories = useMemo(() => {
+    return (categories || [])
+      .filter((category) => category.activa !== false && category.activo !== false)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [categories]);
 
-  const activeCharacters = useMemo(
-    () => (characters || []).filter((item) => item.activo !== false),
-    [characters]
-  );
+  const activeSeriesNames = useMemo(() => {
+    return (series || [])
+      .filter((serie) => serie.activo !== false)
+      .map((serie) => serie.nombre)
+      .filter(Boolean);
+  }, [series]);
+
+  const activeEventNames = useMemo(() => {
+    return (events || [])
+      .filter((event) => event.activo !== false)
+      .map((event) => event.titulo || event.nombre)
+      .filter(Boolean);
+  }, [events]);
+
+  const characterOptions = useMemo(() => {
+    return (characters || [])
+      .filter((character) => character.activo !== false)
+      .map((character) => character.nombre)
+      .filter(Boolean);
+  }, [characters]);
+
+  const setImagesAndTouch = (updater) => {
+    setImagesTouched(true);
+    setImages((currentImages) =>
+      typeof updater === "function" ? updater(currentImages) : updater
+    );
+  };
 
   const resetForm = () => {
     setForm(initialForm);
     setImages([]);
+    setImagesTouched(false);
     setEditingProduct(null);
+    setView("list");
   };
 
   const openCreateForm = () => {
-    resetForm();
     setMessage("");
+    setEditingProduct(null);
+    setForm(initialForm);
+    setImages([]);
+    setImagesTouched(false);
     setView("form");
   };
 
   const openEditForm = (product) => {
-    setEditingProduct(product);
+    const category = getProductCategory(product);
 
+    setMessage("");
+    setEditingProduct(product);
     setForm({
       nombre: product.nombre || "",
+      categoriaId: category.id || "",
+      categoriaNombre: category.nombre || "",
       serie: getProductSerie(product),
-      tipo: getProductType(product),
       evento: getProductEvento(product),
-      personajes: normalizePersonajesFromProduct(product),
+      tipo: getProductType(product),
+      personajesNombre: normalizePersonajesFromProduct(product),
       material: product.material || "",
       precio: getProductPrice(product),
-      stock: getStockInputFromProduct(product),
+      stock: Number(product.stock || 0),
       tamano: product.tamano || "",
       estado: product.estado || "Activo",
-      adulto: Boolean(product.adulto)
+      adulto: Boolean(product.adulto),
+      esNuevo: product.esNuevo !== undefined ? Boolean(product.esNuevo) : true,
+      esDestacado: Boolean(product.esDestacado)
     });
 
-    setImages(product.imagenes || []);
-    setMessage("");
+    setImages(
+      Array.isArray(product.imagenes)
+        ? product.imagenes
+            .map((image, index) => createEditableImageFromProduct(image, index))
+            .filter(Boolean)
+        : []
+    );
+
+    setImagesTouched(false);
     setView("form");
   };
 
-  const goBackToList = () => {
-    resetForm();
-    setView("list");
+  const handleChange = (event) => {
+    const { name, value, type, checked } = event.target;
+
+    setForm((currentForm) => ({
+      ...currentForm,
+      [name]: type === "checkbox" ? checked : value
+    }));
   };
 
-  const handleChange = (event) => {
-    const { name, value } = event.target;
+  const handleCategoryChange = (event) => {
+    const categoryId = event.target.value;
+    const selectedCategory = activeCategories.find(
+      (category) => (category._id || category.id) === categoryId
+    );
 
-    setForm({
-      ...form,
-      [name]: value
+    setForm((currentForm) => ({
+      ...currentForm,
+      categoriaId,
+      categoriaNombre: selectedCategory?.nombre || ""
+    }));
+  };
+
+  const ensureCategoryExists = async () => {
+    if (form.categoriaId) {
+      const selectedCategory = activeCategories.find(
+        (category) => (category._id || category.id) === form.categoriaId
+      );
+
+      return {
+        id: form.categoriaId,
+        nombre: selectedCategory?.nombre || form.categoriaNombre
+      };
+    }
+
+    const categoryName = form.categoriaNombre.trim();
+
+    if (!categoryName) {
+      throw new Error("Selecciona o crea una categoría real.");
+    }
+
+    const existingCategory = activeCategories.find(
+      (category) => normalizeText(category.nombre) === normalizeText(categoryName)
+    );
+
+    if (existingCategory) {
+      return {
+        id: existingCategory._id || existingCategory.id,
+        nombre: existingCategory.nombre
+      };
+    }
+
+    const createdCategory = await createCategoryFull({
+      nombre: categoryName,
+      descripcion: "Categoría creada rápidamente desde productos.",
+      tipo: "principal",
+      orden: 0,
+      activa: true
     });
+
+    await refreshCategories?.();
+
+    return {
+      id: createdCategory._id || createdCategory.id,
+      nombre: createdCategory.nombre
+    };
+  };
+
+  const buildPayload = async () => {
+    const category = await ensureCategoryExists();
+
+    const payload = {
+      nombre: form.nombre.trim(),
+
+      categoriaId: category.id,
+      categoria: category.id,
+      categoriaNombre: category.nombre,
+
+      serie: form.serie.trim(),
+      serieNombre: form.serie.trim(),
+
+      evento: form.evento.trim(),
+      eventoNombre: form.evento.trim(),
+
+      tipo: form.tipo.trim(),
+      tipoProducto: form.tipo.trim(),
+
+      personajesNombre: form.personajesNombre,
+      personajeNombre: form.personajesNombre.join(", "),
+
+      material: form.material.trim(),
+      precio: Number(form.precio || 0),
+      precioReferencial: Number(form.precio || 0),
+      stock: Number(form.stock || 0),
+      tamano: form.tamano.trim(),
+      estado: form.estado,
+      adulto: Boolean(form.adulto),
+      esNuevo: Boolean(form.esNuevo),
+      esDestacado: Boolean(form.esDestacado),
+      activo: form.estado !== "Inactivo"
+    };
+
+    if (!editingProduct || imagesTouched) {
+      payload.imagenes = await prepareImagesForPayload(images);
+      payload.imagenesTouched = true;
+    }
+
+    return payload;
   };
 
   const handleSubmit = async (event) => {
@@ -245,79 +612,47 @@ function AdminProductsPage() {
       return;
     }
 
-    if (!form.serie.trim()) {
-      setMessage("Selecciona una serie.");
+    if (!form.categoriaId && !form.categoriaNombre.trim()) {
+      setMessage("Selecciona o crea una categoría.");
       return;
     }
 
     if (!form.tipo.trim()) {
-      setMessage("Selecciona el tipo de producto.");
+      setMessage("Escribe o selecciona el tipo de producto.");
       return;
     }
 
-    if (!form.precio || Number(form.precio) <= 0) {
-      setMessage("Ingresa un precio válido.");
+    if (Number(form.precio || 0) < 0) {
+      setMessage("El precio no puede ser negativo.");
       return;
     }
 
-    setIsSaving(true);
-    setMessage("Guardando producto...");
+    if (Number(form.stock || 0) < 0) {
+      setMessage("El stock no puede ser negativo.");
+      return;
+    }
+
+    if (!editingProduct && images.length === 0) {
+      setMessage("Sube al menos una imagen del producto.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage(
+      editingProduct
+        ? "Guardando cambios del producto..."
+        : "Creando producto..."
+    );
 
     try {
-      const preparedImages = await prepareProductImagesForSave(images);
-      const stockData = parseStockOrAvailability(form.stock);
+      for (const characterName of form.personajesNombre) {
+        await createCharacterQuick({
+          name: characterName,
+          serie: form.serie
+        });
+      }
 
-      const personajesNombre = Array.isArray(form.personajes)
-        ? form.personajes.filter(Boolean)
-        : [];
-
-      const payload = {
-        nombre: form.nombre.trim(),
-        descripcion:
-          editingProduct?.descripcion ||
-          "Producto registrado desde el panel administrador de Smika Store.",
-
-        serie: form.serie,
-        serieNombre: form.serie,
-
-        tipo: form.tipo,
-        tipoProducto: form.tipo,
-
-        evento: form.evento,
-        eventoNombre: form.evento,
-
-        personajes: [],
-        personajesNombre,
-        personaje: personajesNombre[0] || "",
-        personajeNombre: personajesNombre.join(", "),
-
-        material: form.material,
-        tamano: form.tamano,
-
-        precio: Number(form.precio),
-        price: Number(form.precio),
-        precioReferencial: Number(form.precio),
-
-        stock: stockData.stock,
-        tiempoEstimado: stockData.tiempoEstimado,
-        estado: form.estado,
-        disponibilidad:
-          form.estado === "Preventa"
-            ? "preventa"
-            : form.estado === "Agotado"
-            ? "agotado"
-            : stockData.disponibilidad,
-
-        adulto: Boolean(form.adulto),
-        imagenes: preparedImages,
-        activo: form.estado !== "Inactivo",
-
-        categoriaNombre: "Productos",
-        origenNombre: "Variado",
-        marca: "Smika Store",
-        esNuevo: editingProduct?.esNuevo ?? true,
-        esDestacado: editingProduct?.esDestacado ?? false
-      };
+      const payload = await buildPayload();
 
       if (editingProduct) {
         await updateProduct(getProductId(editingProduct), payload);
@@ -328,28 +663,29 @@ function AdminProductsPage() {
       }
 
       resetForm();
-      setView("list");
       await refreshProducts?.();
     } catch (error) {
-      setMessage(
-        error.message ||
-          "No se pudo guardar el producto. Revisa tu sesión de administrador o la conexión con el servidor."
-      );
+      setMessage(error.message || "No se pudo guardar el producto.");
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
   };
 
-  const handleToggleProductStatus = async (product) => {
-    try {
-      setIsSaving(true);
-      setMessage(
-        product.activo
-          ? "Desactivando producto..."
-          : "Activando producto..."
-      );
+  const handleToggleStatus = async (product) => {
+    const productId = getProductId(product);
 
-      await toggleProductStatus(getProductId(product));
+    if (!productId) {
+      setMessage("No se encontró el ID del producto.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage(
+      product.activo ? "Desactivando producto..." : "Activando producto..."
+    );
+
+    try {
+      await toggleProductStatus(productId);
       await refreshProducts?.();
 
       setMessage(
@@ -360,24 +696,23 @@ function AdminProductsPage() {
     } catch (error) {
       setMessage(error.message || "No se pudo cambiar el estado del producto.");
     } finally {
-      setIsSaving(false);
+      setSaving(false);
     }
   };
 
   return (
     <section className="space-y-6">
-      <div className="rounded-[28px] bg-white p-6 smika-shadow">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="rounded-[32px] bg-white p-8 smika-shadow border border-[#87CCC8]/20">
+        <p className="text-[#87CCC8] font-black">Productos</p>
+
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <p className="font-black text-[#87CCC8]">Productos</p>
+            <h2 className="text-4xl font-black">Gestión de productos</h2>
 
-            <h1 className="mt-2 text-3xl font-black text-[#2F2F2F]">
-              Gestión de productos
-            </h1>
-
-            <p className="mt-3 text-sm text-gray-600">
-              Desde aquí puedes crear, editar, activar o desactivar productos
-              del catálogo de Smika Store.
+            <p className="mt-3 text-gray-600 max-w-3xl leading-7">
+              Crea productos usando categorías reales desde MongoDB. Si editas
+              nombre, precio, stock u otros datos, las imágenes no se modifican
+              salvo que vuelvas a tocarlas.
             </p>
           </div>
 
@@ -386,14 +721,14 @@ function AdminProductsPage() {
               <button
                 type="button"
                 onClick={refreshProducts}
-                disabled={loadingProducts || isSaving}
+                disabled={loadingProducts || saving}
                 className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 <RefreshCw
                   size={18}
                   className={loadingProducts ? "animate-spin" : ""}
                 />
-                Recargar productos
+                Recargar
               </button>
             )}
 
@@ -409,412 +744,462 @@ function AdminProductsPage() {
             ) : (
               <button
                 type="button"
-                onClick={goBackToList}
+                onClick={resetForm}
                 className="rounded-full bg-[#F7D9D8] px-5 py-3 font-black flex items-center justify-center gap-2"
               >
                 <ArrowLeft size={18} />
-                Volver a productos
+                Volver
               </button>
             )}
           </div>
         </div>
       </div>
 
-      {message && (
+      {(message || storageError || productLoadError || categoriesLoadError) && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
-          {message}
-        </div>
-      )}
-
-      {storageError && (
-        <div className="rounded-[24px] bg-red-50 px-5 py-4 text-sm font-black text-red-600">
-          {storageError}
-        </div>
-      )}
-
-      {productLoadError && (
-        <div className="rounded-[24px] bg-red-50 px-5 py-4 text-sm font-black text-red-600">
-          {productLoadError}
-        </div>
-      )}
-
-      {view === "list" && (
-        <div className="rounded-[28px] bg-white p-5 smika-shadow">
-          <h2 className="text-2xl font-black text-[#2F2F2F]">
-            Productos registrados
-          </h2>
-
-          <p className="mt-2 text-sm text-gray-600">
-            Esta lista muestra los productos disponibles para administrar dentro
-            del catálogo.
-          </p>
-
-          <div className="mt-6 overflow-x-auto">
-            <table className="w-full min-w-[860px] text-left text-sm">
-              <thead>
-                <tr className="bg-[#F8F6F7] text-[#2F2F2F]">
-                  <th className="px-4 py-4 font-black">Producto</th>
-                  <th className="px-4 py-4 font-black">Serie</th>
-                  <th className="px-4 py-4 font-black">Tipo</th>
-                  <th className="px-4 py-4 font-black">Evento</th>
-                  <th className="px-4 py-4 font-black">Precio</th>
-                  <th className="px-4 py-4 font-black text-center">
-                    Acciones
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {(products || []).map((product) => {
-                  const productId = getProductId(product);
-
-                  return (
-                    <tr
-                      key={productId || product.slug}
-                      className="border-b border-[#F8F6F7] last:border-0"
-                    >
-                      <td className="px-4 py-4">
-                        <div className="flex items-center gap-3">
-                          <div className="h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-[#87CCC8] text-white flex items-center justify-center">
-                            {product.imagenes?.[0] ? (
-                              <CroppedImagePreview
-                                image={product.imagenes[0]}
-                                alt={product.nombre}
-                                className="h-full w-full"
-                                rounded="rounded-2xl"
-                              />
-                            ) : (
-                              <ShoppingBag size={18} />
-                            )}
-                          </div>
-
-                          <div className="min-w-0">
-                            <p className="font-black text-[#2F2F2F]">
-                              {product.nombre}
-                            </p>
-
-                            <p className="mt-1 text-xs text-gray-500">
-                              {getAvailabilitySummary(product)} ·{" "}
-                              {product.estado || "Activo"}
-                            </p>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="px-4 py-4">{getProductSerie(product)}</td>
-                      <td className="px-4 py-4">{getProductType(product)}</td>
-                      <td className="px-4 py-4">
-                        {getProductEvento(product) || "Sin evento"}
-                      </td>
-
-                      <td className="px-4 py-4 font-black">
-                        S/ {getProductPrice(product)}
-                      </td>
-
-                      <td className="px-4 py-4">
-                        <div className="flex justify-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => openEditForm(product)}
-                            className="h-10 w-10 rounded-full bg-[#F7D9D8] flex items-center justify-center"
-                            title="Editar producto"
-                          >
-                            <Pencil size={16} />
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => handleToggleProductStatus(product)}
-                            disabled={isSaving}
-                            className="h-10 w-10 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-60"
-                            title={
-                              product.activo
-                                ? "Desactivar producto"
-                                : "Activar producto"
-                            }
-                          >
-                            <Power
-                              size={16}
-                              className={
-                                product.activo
-                                  ? "text-gray-500"
-                                  : "text-red-500"
-                              }
-                            />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-
-                {(!products || products.length === 0) && (
-                  <tr>
-                    <td
-                      colSpan="6"
-                      className="px-4 py-10 text-center text-gray-500"
-                    >
-                      Todavía no hay productos registrados.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+          {message || storageError || productLoadError || categoriesLoadError}
         </div>
       )}
 
       {view === "form" && (
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <FormSection
-            title={editingProduct ? "Editar producto" : "Crear producto"}
-            description="Completa los datos principales del producto. Al guardar se actualizará el catálogo de la tienda."
-          >
-            <div className="grid gap-4 lg:grid-cols-2">
-              <div>
-                <label className="text-sm font-black">
-                  Nombre del producto
-                </label>
-                <input
-                  name="nombre"
-                  value={form.nombre}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                  placeholder="Ejemplo: Pin Tei Adulto"
-                />
-              </div>
+        <form
+          onSubmit={handleSubmit}
+          className="rounded-[32px] bg-white p-6 smika-shadow border border-[#87CCC8]/20"
+        >
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="text-[#87CCC8] font-black">
+                {editingProduct ? "Editar producto" : "Nuevo producto"}
+              </p>
 
-              <div>
-                <label className="text-sm font-black">Serie</label>
-                <select
-                  name="serie"
-                  value={form.serie}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                >
-                  <option value="">Seleccionar serie</option>
-                  {activeSeries.map((item) => (
-                    <option
-                      key={item.id || item.slug || item.nombre}
-                      value={item.nombre}
-                    >
-                      {item.nombre}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-black">
-                  Tipo de producto
-                </label>
-                <select
-                  name="tipo"
-                  value={form.tipo}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                >
-                  <option value="">Seleccionar tipo</option>
-                  {productTypes.map((type) => (
-                    <option key={type} value={type}>
-                      {type}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-black">Evento opcional</label>
-                <select
-                  name="evento"
-                  value={form.evento}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                >
-                  <option value="">Sin evento</option>
-                  {activeEvents.map((eventItem) => (
-                    <option
-                      key={eventItem.id || eventItem.slug || eventItem.nombre}
-                      value={eventItem.nombre}
-                    >
-                      {eventItem.nombre}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <label className="text-sm font-black">Material</label>
-                <input
-                  name="material"
-                  value={form.material}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                  placeholder="Acrílico, metal, papel..."
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-black">Tamaño opcional</label>
-                <input
-                  name="tamano"
-                  value={form.tamano}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                  placeholder="Ejemplo: 7 cm"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-black">Precio referencial</label>
-                <input
-                  name="precio"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={form.precio}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                  placeholder="15"
-                />
-              </div>
-
-              <div>
-                <label className="text-sm font-black">
-                  Cantidad o disponibilidad
-                </label>
-                <input
-                  name="stock"
-                  type="text"
-                  value={form.stock}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                  placeholder="15 o Disponibilidad por confirmar con Smika Store 💖"
-                />
-                <p className="mt-2 text-xs leading-5 text-gray-500">
-                  Escribe un número si hay unidades exactas. Si no hay cantidad
-                  fija, escribe un mensaje como “Disponibilidad por confirmar
-                  con Smika Store 💖”.
-                </p>
-              </div>
-
-              <div>
-                <label className="text-sm font-black">Estado</label>
-                <select
-                  name="estado"
-                  value={form.estado}
-                  onChange={handleChange}
-                  className="mt-2 w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                >
-                  <option value="Activo">Activo</option>
-                  <option value="Preventa">Preventa</option>
-                  <option value="Agotado">Agotado</option>
-                  <option value="Inactivo">Inactivo</option>
-                </select>
-              </div>
+              <h3 className="mt-2 text-2xl font-black">
+                {editingProduct
+                  ? "Actualizar producto"
+                  : "Registrar producto"}
+              </h3>
             </div>
-          </FormSection>
-
-          <FormSection
-            title="Personajes"
-            description="Puedes elegir uno o varios personajes relacionados con el producto."
-          >
-            <MultiCreatableSelect
-              label="Personajes opcionales"
-              values={form.personajes}
-              onChange={(values) =>
-                setForm({
-                  ...form,
-                  personajes: values
-                })
-              }
-              options={activeCharacters}
-              onCreate={(name) =>
-                createCharacterQuick({
-                  name,
-                  serie: form.serie || ""
-                })
-              }
-              onSecondaryCreate={(name) =>
-                createCharacterQuick({
-                  name,
-                  serie: ""
-                })
-              }
-              placeholder="Escribe un personaje, por ejemplo: Tamon"
-              emptyLabel="Sin personajes"
-              emptyCreateLabel="Agregar personaje"
-              createLabel={(name) =>
-                form.serie
-                  ? `Agregar personaje “${name}” a “${form.serie}”`
-                  : `Agregar personaje “${name}”`
-              }
-              secondaryCreateLabel={(name) =>
-                form.serie
-                  ? `Agregar personaje “${name}” sin asociar a serie`
-                  : `Agregar personaje “${name}” sin serie definida`
-              }
-              helperText={
-                form.serie
-                  ? `Puedes seleccionar varios personajes y asociar nuevos a “${form.serie}”.`
-                  : "Puedes elegir o crear varios personajes aunque todavía no hayas seleccionado una serie."
-              }
-            />
-          </FormSection>
-
-          <FormSection
-            title="Configuración"
-            description="Marca si el producto requiere aviso de contenido adulto."
-          >
-            <SwitchInput
-              label="Producto +18"
-              description="Activa esta opción si el producto requiere advertencia para el cliente."
-              checked={form.adulto}
-              onChange={(checked) =>
-                setForm({
-                  ...form,
-                  adulto: checked
-                })
-              }
-            />
-          </FormSection>
-
-          <FormSection
-            title="Imágenes del producto"
-            description="La primera imagen se mostrará como miniatura en el listado."
-          >
-            <ImageDropzone
-              label="Subir imágenes del producto"
-              description="Arrastra imágenes o selecciónalas. El sistema comprimirá y preparará el recorte final."
-              images={images}
-              setImages={setImages}
-              multiple
-            />
-          </FormSection>
-
-          <div className="flex flex-col gap-3 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={goBackToList}
-              className="rounded-full bg-[#F8F6F7] px-6 py-3 font-black"
-            >
-              Cancelar
-            </button>
 
             <button
               type="submit"
-              disabled={isSaving}
+              disabled={saving}
               className="smika-button-primary flex items-center justify-center gap-2 disabled:opacity-60"
             >
-              <Save size={18} />
-              {isSaving
-                ? "Guardando..."
-                : editingProduct
-                ? "Guardar cambios"
-                : "Crear producto"}
+              {saving ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Save size={18} />
+              )}
+              {saving ? "Guardando..." : "Guardar"}
             </button>
           </div>
+
+          <div className="mt-6 grid gap-5 lg:grid-cols-2">
+            <label className="grid gap-2 text-sm font-black">
+              Nombre
+              <input
+                name="nombre"
+                value={form.nombre}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Ejemplo: Stand de acrílico..."
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Categoría real
+              <select
+                value={form.categoriaId}
+                onChange={handleCategoryChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              >
+                <option value="">Seleccionar categoría existente</option>
+
+                {activeCategories.map((category) => (
+                  <option key={category._id || category.id} value={category._id || category.id}>
+                    {category.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black lg:col-span-2">
+              Crear categoría si no existe
+              <input
+                name="categoriaNombre"
+                value={form.categoriaNombre}
+                onChange={(event) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    categoriaId: "",
+                    categoriaNombre: event.target.value
+                  }))
+                }
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Escribe una categoría nueva si no está en la lista"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Serie
+              <input
+                name="serie"
+                list="series-options"
+                value={form.serie}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Buscar o escribir serie"
+              />
+
+              <datalist id="series-options">
+                {activeSeriesNames.map((serie) => (
+                  <option key={serie} value={serie} />
+                ))}
+              </datalist>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Evento
+              <input
+                name="evento"
+                list="events-options"
+                value={form.evento}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Buscar o escribir evento"
+              />
+
+              <datalist id="events-options">
+                {activeEventNames.map((eventName) => (
+                  <option key={eventName} value={eventName} />
+                ))}
+              </datalist>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Tipo de producto
+              <input
+                name="tipo"
+                list="product-types"
+                value={form.tipo}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Stand, llavero, photocard..."
+              />
+
+              <datalist id="product-types">
+                {productTypes.map((type) => (
+                  <option key={type} value={type} />
+                ))}
+              </datalist>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Material
+              <input
+                name="material"
+                value={form.material}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Acrílico, papel, metal..."
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Precio referencial
+              <input
+                name="precio"
+                type="number"
+                min="0"
+                step="0.01"
+                value={form.precio}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Stock
+              <input
+                name="stock"
+                type="number"
+                min="0"
+                value={form.stock}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Tamaño
+              <input
+                name="tamano"
+                value={form.tamano}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="10 cm, A5, estándar..."
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Estado
+              <select
+                name="estado"
+                value={form.estado}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              >
+                <option value="Activo">Activo</option>
+                <option value="Preventa">Preventa</option>
+                <option value="Por pedido">Por pedido</option>
+                <option value="Agotado">Agotado</option>
+                <option value="Inactivo">Inactivo</option>
+              </select>
+            </label>
+
+            <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4">
+              <label className="flex items-center justify-between gap-4 text-sm font-black">
+                Producto nuevo
+                <input
+                  type="checkbox"
+                  name="esNuevo"
+                  checked={form.esNuevo}
+                  onChange={handleChange}
+                  className="h-5 w-5"
+                />
+              </label>
+
+              <label className="flex items-center justify-between gap-4 text-sm font-black">
+                Destacado
+                <input
+                  type="checkbox"
+                  name="esDestacado"
+                  checked={form.esDestacado}
+                  onChange={handleChange}
+                  className="h-5 w-5"
+                />
+              </label>
+
+              <label className="flex items-center justify-between gap-4 text-sm font-black">
+                Producto adulto
+                <input
+                  type="checkbox"
+                  name="adulto"
+                  checked={form.adulto}
+                  onChange={handleChange}
+                  className="h-5 w-5"
+                />
+              </label>
+            </div>
+
+            <div className="lg:col-span-2">
+              <MultiTextInput
+                label="Personajes / criaturas"
+                values={form.personajesNombre}
+                setValues={(updater) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    personajesNombre:
+                      typeof updater === "function"
+                        ? updater(currentForm.personajesNombre)
+                        : updater
+                  }))
+                }
+                options={characterOptions}
+                placeholder="Ejemplo: Shuraka"
+                helperText="Si escribes un personaje que no existe, se creará como faltan detalles."
+              />
+            </div>
+
+            <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
+              <p className="font-black">Imágenes del producto</p>
+
+              <p className="mt-1 text-sm text-gray-600 leading-6">
+                Si editas el producto y no tocas esta zona, las imágenes
+                guardadas no se envían otra vez ni se modifican.
+              </p>
+
+              <div className="mt-4">
+                <ImageDropzone
+                  label="Subir imágenes"
+                  description="Arrastra o selecciona imágenes del producto."
+                  images={images}
+                  setImages={setImagesAndTouch}
+                  multiple
+                />
+              </div>
+            </div>
+
+            <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
+              <p className="font-black">Vista previa</p>
+
+              {images.length > 0 ? (
+                <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {images.map((image, index) => (
+                    <CroppedImagePreview
+                      key={image.id || index}
+                      image={image}
+                      index={index}
+                      onChange={(updatedImage) => {
+                        setImagesTouched(true);
+                        setImages((currentImages) =>
+                          currentImages.map((item, itemIndex) =>
+                            itemIndex === index ? updatedImage : item
+                          )
+                        );
+                      }}
+                      onRemove={() => {
+                        setImagesTouched(true);
+                        setImages((currentImages) =>
+                          currentImages.filter((_, itemIndex) => itemIndex !== index)
+                        );
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="mt-4 flex h-48 items-center justify-center rounded-3xl bg-white text-gray-400">
+                  <ImageIcon size={42} />
+                </div>
+              )}
+            </div>
+          </div>
         </form>
+      )}
+
+      {view === "list" && (
+        <>
+          {loadingProducts ? (
+            <div className="rounded-[32px] bg-white p-8 text-center smika-shadow">
+              <Loader2
+                size={42}
+                className="mx-auto animate-spin text-[#87CCC8]"
+              />
+              <p className="mt-4 font-black">Cargando productos...</p>
+            </div>
+          ) : sortedProducts.length === 0 ? (
+            <div className="rounded-[32px] bg-white p-8 text-center smika-shadow">
+              <ShoppingBag size={42} className="mx-auto text-[#D1B0C7]" />
+
+              <h3 className="mt-4 text-2xl font-black">
+                Todavía no hay productos
+              </h3>
+
+              <p className="mt-2 text-gray-600">
+                Crea un producto para verlo en el catálogo.
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-6 xl:grid-cols-3">
+              {sortedProducts.map((product) => {
+                const category = getProductCategory(product);
+                const firstImage = Array.isArray(product.imagenes)
+                  ? product.imagenes[0]
+                  : null;
+
+                return (
+                  <article
+                    key={getProductId(product)}
+                    className="rounded-[28px] bg-white border border-[#87CCC8]/20 smika-shadow overflow-hidden"
+                  >
+                    <div className="h-44 bg-[#F8F6F7]">
+                      {firstImage ? (
+                        <img
+                          src={getImageSource(firstImage)}
+                          alt={product.nombre}
+                          className="h-full w-full object-contain"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-gray-400">
+                          <ImageIcon size={36} />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-6">
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-[#F7D9D8] px-3 py-1 text-xs font-black">
+                          {product.activo ? "Activo" : "Inactivo"}
+                        </span>
+
+                        <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
+                          {product.estado || "Activo"}
+                        </span>
+                      </div>
+
+                      <h3 className="mt-4 text-xl font-black">
+                        {product.nombre}
+                      </h3>
+
+                      <div className="mt-3 grid gap-2 text-sm text-gray-600">
+                        <p>
+                          <strong>Categoría:</strong>{" "}
+                          {category.nombre || "Sin categoría"}
+                        </p>
+
+                        <p>
+                          <strong>Tipo:</strong>{" "}
+                          {getProductType(product) || "Sin tipo"}
+                        </p>
+
+                        <p>
+                          <strong>Serie:</strong>{" "}
+                          {getProductSerie(product) || "Sin serie"}
+                        </p>
+
+                        <p>
+                          <strong>Evento:</strong>{" "}
+                          {getProductEvento(product) || "Sin evento"}
+                        </p>
+
+                        <p>
+                          <strong>Precio:</strong> S/ {getProductPrice(product)}
+                        </p>
+
+                        <p>
+                          <strong>Stock:</strong> {product.stock || 0}
+                        </p>
+
+                        <p>
+                          <strong>Imágenes:</strong>{" "}
+                          {Array.isArray(product.imagenes)
+                            ? product.imagenes.length
+                            : 0}
+                        </p>
+                      </div>
+
+                      <div className="mt-5 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditForm(product)}
+                          className="smika-button-primary flex-1 flex items-center justify-center gap-2"
+                        >
+                          <Pencil size={16} />
+                          Editar
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleStatus(product)}
+                          disabled={saving}
+                          className="h-11 w-11 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-60"
+                          title={product.activo ? "Desactivar" : "Activar"}
+                        >
+                          <Power
+                            size={17}
+                            className={
+                              product.activo ? "text-gray-500" : "text-red-500"
+                            }
+                          />
+                        </button>
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </>
       )}
     </section>
   );
