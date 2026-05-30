@@ -8,6 +8,8 @@ import { getPublicProducts } from "../../utils/publicProducts";
 import ProductCard from "../../components/product/ProductCard";
 import UserRegisteredEventsSection from "../../components/event/UserRegisteredEventsSection";
 
+const homeBannerImage = "/images/home-banner.jpg";
+
 function HomePage() {
   const { products } = useAdminData();
 
@@ -76,9 +78,9 @@ function HomePage() {
           <div className="relative">
             <div className="rounded-[36px] bg-white p-5 smika-shadow">
               <img
-                src="https://placehold.co/700x700/87CCC8/FFFFFF?text=Smika+Store"
-                alt="Banner Smika Store"
-                className="rounded-[28px] w-full object-cover"
+                src={homeBannerImage}
+                alt="Banner principal de Smika Store"
+                className="aspect-square w-full rounded-[28px] object-cover"
               />
             </div>
 
