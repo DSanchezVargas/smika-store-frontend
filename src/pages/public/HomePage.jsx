@@ -78,7 +78,7 @@ function HomePage() {
           <div className="relative">
             <div className="rounded-[36px] bg-white p-5 smika-shadow">
               <img
-                src="/public/images/home-banner.jpg"
+                src="//home-banner.jpg"
                 alt="Banner principal de Smika Store"
                 className="aspect-square w-full rounded-[28px] object-cover"
               />
