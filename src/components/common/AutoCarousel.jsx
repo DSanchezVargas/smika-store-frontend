@@ -28,7 +28,8 @@ function AutoCarousel({
   heightClassName = "h-64",
   interval = 6000,
   autoPlay = true,
-  showDots = true
+  showDots = true,
+  fit = "contain"
 }) {
   const normalizedImages = useMemo(() => {
     return images.map(getImageSource).filter(Boolean);
@@ -38,6 +39,8 @@ function AutoCarousel({
 
   const totalImages = normalizedImages.length;
   const hasMultipleImages = totalImages > 1;
+
+  const objectFitClass = fit === "cover" ? "object-cover" : "object-contain";
 
   const goToPrevious = () => {
     if (!hasMultipleImages) return;
@@ -100,13 +103,13 @@ function AutoCarousel({
         {normalizedImages.map((image, index) => (
           <div
             key={`${image}-${index}`}
-            className="h-full shrink-0"
+            className="h-full shrink-0 bg-[#F8F6F7]"
             style={{ width: `${100 / totalImages}%` }}
           >
             <img
               src={image}
               alt={`${alt} ${index + 1}`}
-              className={`h-full w-full object-cover ${imageClassName}`}
+              className={`h-full w-full ${objectFitClass} ${imageClassName}`}
               loading="lazy"
             />
           </div>

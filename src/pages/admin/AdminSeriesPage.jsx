@@ -1,6 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
+  ChevronLeft,
+  ChevronRight,
+  Image as ImageIcon,
   Loader2,
   Pencil,
   Plus,
@@ -11,12 +14,8 @@ import {
   UsersRound
 } from "lucide-react";
 
-import CreatableSelect from "../../components/admin/CreatableSelect";
 import ImageDropzone from "../../components/admin/ImageDropzone";
-import AutoCarousel from "../../components/common/AutoCarousel";
-
 import { useAdminData } from "../../context/AdminDataContext";
-import { prepareProductImagesForSave } from "../../utils/prepareProductImagesForSave";
 
 const initialForm = {
   nombre: "",
@@ -96,28 +95,52 @@ function getImageSource(image) {
   return "";
 }
 
-function makeOption(nombre) {
-  return {
-    id: createSlug(nombre),
-    nombre
-  };
+function getImageFile(image) {
+  if (!image || typeof image !== "object") return null;
+
+  return image.finalFile || image.file || null;
 }
 
-function uniqueOptions(values = []) {
-  const map = new Map();
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
 
-  values
-    .map((value) => value?.toString().trim())
+    const reader = new FileReader();
+
+    reader.onload = () => resolve(reader.result || "");
+    reader.onerror = () => reject(new Error("No se pudo leer la imagen."));
+
+    reader.readAsDataURL(file);
+  });
+}
+
+async function imageToPersistedSource(image) {
+  const file = getImageFile(image);
+
+  if (file) {
+    return fileToDataUrl(file);
+  }
+
+  return getImageSource(image);
+}
+
+async function prepareImagesForPayload(images = []) {
+  const preparedImages = await Promise.all(images.map(imageToPersistedSource));
+
+  const seenImages = new Set();
+
+  return preparedImages
+    .map((image) => image?.toString().trim())
     .filter(Boolean)
-    .forEach((value) => {
-      const key = normalizeText(value);
+    .filter((image) => {
+      if (seenImages.has(image)) return false;
 
-      if (!map.has(key)) {
-        map.set(key, makeOption(value));
-      }
+      seenImages.add(image);
+      return true;
     });
-
-  return [...map.values()].sort((a, b) => a.nombre.localeCompare(b.nombre));
 }
 
 function getCountryCodeFromOrigin(originName = "") {
@@ -137,18 +160,35 @@ function getSeriesStatus(serie) {
   return "Activa";
 }
 
-function getSeriesImages(serie) {
+function uniqueTextOptions(values = []) {
+  const map = new Map();
+
+  values
+    .map((value) => value?.toString().trim())
+    .filter(Boolean)
+    .forEach((value) => {
+      const key = normalizeText(value);
+
+      if (!map.has(key)) {
+        map.set(key, value);
+      }
+    });
+
+  return [...map.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function getCoverImageFromSerie(serie) {
+  return getImageSource(serie?.imagen);
+}
+
+function getAdditionalImagesFromSerie(serie) {
+  const coverImage = getCoverImageFromSerie(serie);
+
   const images = Array.isArray(serie?.imagenes)
     ? serie.imagenes.map(getImageSource).filter(Boolean)
     : [];
 
-  const mainImage = getImageSource(serie?.imagen);
-
-  if (mainImage && !images.includes(mainImage)) {
-    images.unshift(mainImage);
-  }
-
-  return images;
+  return images.filter((image) => image !== coverImage);
 }
 
 function createEditableImageFromSource(src, index = 0) {
@@ -192,6 +232,331 @@ function createEditableImageFromSource(src, index = 0) {
   };
 }
 
+function PreviewCarousel({
+  images = [],
+  alt = "Imagen",
+  heightClassName = "h-72",
+  autoPlay = true,
+  showDots = true
+}) {
+  const normalizedImages = useMemo(() => {
+    return images.map(getImageSource).filter(Boolean);
+  }, [images]);
+
+  const [currentIndex, setCurrentIndex] = useState(0);
+
+  const totalImages = normalizedImages.length;
+  const hasMultipleImages = totalImages > 1;
+
+  const goToPrevious = () => {
+    if (!hasMultipleImages) return;
+
+    setCurrentIndex((current) =>
+      current === 0 ? totalImages - 1 : current - 1
+    );
+  };
+
+  const goToNext = () => {
+    if (!hasMultipleImages) return;
+
+    setCurrentIndex((current) =>
+      current === totalImages - 1 ? 0 : current + 1
+    );
+  };
+
+  useEffect(() => {
+    if (!autoPlay || !hasMultipleImages) return undefined;
+
+    const timer = window.setInterval(() => {
+      setCurrentIndex((current) =>
+        current === totalImages - 1 ? 0 : current + 1
+      );
+    }, 6000);
+
+    return () => window.clearInterval(timer);
+  }, [autoPlay, hasMultipleImages, totalImages]);
+
+  useEffect(() => {
+    if (currentIndex > totalImages - 1) {
+      setCurrentIndex(0);
+    }
+  }, [currentIndex, totalImages]);
+
+  if (totalImages === 0) {
+    return (
+      <div
+        className={`${heightClassName} flex items-center justify-center rounded-[28px] bg-white text-gray-400`}
+      >
+        <div className="text-center">
+          <ImageIcon size={38} className="mx-auto" />
+          <p className="mt-2 text-sm font-black">Sin imágenes</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className={`${heightClassName} relative overflow-hidden rounded-[28px] bg-white`}
+    >
+      <div
+        className="flex h-full transition-transform duration-700 ease-in-out"
+        style={{
+          width: `${totalImages * 100}%`,
+          transform: `translateX(-${currentIndex * (100 / totalImages)}%)`
+        }}
+      >
+        {normalizedImages.map((image, index) => (
+          <div
+            key={`${image}-${index}`}
+            className="h-full shrink-0 bg-white"
+            style={{ width: `${100 / totalImages}%` }}
+          >
+            <img
+              src={image}
+              alt={`${alt} ${index + 1}`}
+              className="h-full w-full object-contain"
+              loading="lazy"
+            />
+          </div>
+        ))}
+      </div>
+
+      {hasMultipleImages && (
+        <>
+          <button
+            type="button"
+            onClick={goToPrevious}
+            className="absolute left-3 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow-md"
+            aria-label="Imagen anterior"
+          >
+            <ChevronLeft size={22} />
+          </button>
+
+          <button
+            type="button"
+            onClick={goToNext}
+            className="absolute right-3 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow-md"
+            aria-label="Imagen siguiente"
+          >
+            <ChevronRight size={22} />
+          </button>
+        </>
+      )}
+
+      {showDots && hasMultipleImages && (
+        <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 gap-2 rounded-full bg-white/70 px-3 py-2 backdrop-blur">
+          {normalizedImages.map((image, index) => (
+            <button
+              key={`dot-${image}-${index}`}
+              type="button"
+              onClick={() => setCurrentIndex(index)}
+              className={`h-2.5 rounded-full transition-all ${
+                index === currentIndex
+                  ? "w-7 bg-[#87CCC8]"
+                  : "w-2.5 bg-[#D1B0C7]"
+              }`}
+              aria-label={`Ir a imagen ${index + 1}`}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CreatableDropdown({
+  label,
+  value,
+  options = [],
+  onChange,
+  placeholder = "Escribe o selecciona",
+  createLabel,
+  helperText = ""
+}) {
+  const [isOpen, setIsOpen] = useState(false);
+
+  const cleanValue = value?.trim() || "";
+
+  const filteredOptions = useMemo(() => {
+    const search = normalizeText(cleanValue);
+
+    if (!search) return options;
+
+    return options.filter((option) => normalizeText(option).includes(search));
+  }, [options, cleanValue]);
+
+  const alreadyExists = options.some(
+    (option) => normalizeText(option) === normalizeText(cleanValue)
+  );
+
+  const shouldShowCreate = cleanValue && !alreadyExists;
+
+  return (
+    <label className="relative grid gap-2 text-sm font-black">
+      {label}
+
+      <input
+        value={value}
+        onFocus={() => setIsOpen(true)}
+        onChange={(event) => {
+          onChange(event.target.value);
+          setIsOpen(true);
+        }}
+        onBlur={() => {
+          window.setTimeout(() => setIsOpen(false), 120);
+        }}
+        className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+        placeholder={placeholder}
+      />
+
+      {helperText && (
+        <span className="text-xs font-semibold text-gray-500">
+          {helperText}
+        </span>
+      )}
+
+      {isOpen && (
+        <div className="absolute left-0 right-0 top-[72px] z-30 max-h-64 overflow-auto rounded-2xl border border-[#87CCC8]/30 bg-white p-2 shadow-xl">
+          {filteredOptions.length > 0 ? (
+            filteredOptions.map((option) => (
+              <button
+                key={option}
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  onChange(option);
+                  setIsOpen(false);
+                }}
+                className="w-full rounded-xl px-3 py-2 text-left text-sm font-bold hover:bg-[#F7D9D8]"
+              >
+                {option}
+              </button>
+            ))
+          ) : (
+            <p className="px-3 py-2 text-sm text-gray-500">
+              No hay coincidencias.
+            </p>
+          )}
+
+          {shouldShowCreate && (
+            <button
+              type="button"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => {
+                onChange(cleanValue);
+                setIsOpen(false);
+              }}
+              className="mt-2 w-full rounded-xl bg-[#87CCC8]/20 px-3 py-2 text-left text-sm font-black text-[#2F2F2F]"
+            >
+              {createLabel ? createLabel(cleanValue) : `Agregar “${cleanValue}”`}
+            </button>
+          )}
+        </div>
+      )}
+    </label>
+  );
+}
+
+function AuthorSelector({
+  authorDraft,
+  setAuthorDraft,
+  selectedAuthors,
+  setSelectedAuthors,
+  authorOptions
+}) {
+  const availableAuthors = useMemo(() => {
+    return authorOptions.filter(
+      (option) =>
+        !selectedAuthors.some(
+          (author) => normalizeText(author) === normalizeText(option)
+        )
+    );
+  }, [authorOptions, selectedAuthors]);
+
+  const handleAddAuthor = (authorName) => {
+    const cleanAuthor = authorName?.trim();
+
+    if (!cleanAuthor) return;
+
+    setSelectedAuthors((currentAuthors) => {
+      const exists = currentAuthors.some(
+        (author) => normalizeText(author) === normalizeText(cleanAuthor)
+      );
+
+      if (exists) return currentAuthors;
+
+      return [...currentAuthors, cleanAuthor];
+    });
+
+    setAuthorDraft("");
+  };
+
+  return (
+    <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
+      <p className="font-black">Autores / Creadores</p>
+
+      <p className="mt-1 text-sm text-gray-600 leading-6">
+        Una serie puede tener más de un autor/creador. Si escribes uno nuevo,
+        aparecerá como “Agregar ___ a Autores / Creadores” y quedará enlazado a
+        esta serie.
+      </p>
+
+      <div className="mt-4">
+        <CreatableDropdown
+          label="Agregar autor/creador"
+          value={authorDraft}
+          onChange={setAuthorDraft}
+          options={availableAuthors}
+          placeholder="Busca o escribe un autor/creador"
+          createLabel={(name) => `Agregar “${name}” a Autores / Creadores`}
+          helperText="Presiona el botón de agregar o Enter para añadirlo a la serie."
+        />
+
+        <button
+          type="button"
+          onClick={() => handleAddAuthor(authorDraft)}
+          className="mt-3 rounded-full bg-white px-5 py-3 text-sm font-black"
+        >
+          Agregar autor/creador
+        </button>
+      </div>
+
+      {selectedAuthors.length > 0 ? (
+        <div className="mt-4 flex flex-wrap gap-2">
+          {selectedAuthors.map((author) => (
+            <span
+              key={author}
+              className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black"
+            >
+              {author}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedAuthors((currentAuthors) =>
+                    currentAuthors.filter(
+                      (item) => normalizeText(item) !== normalizeText(author)
+                    )
+                  )
+                }
+                className="text-red-500"
+                title="Quitar autor"
+              >
+                <Trash2 size={15} />
+              </button>
+            </span>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-4 text-sm text-gray-500">
+          Todavía no agregaste autores/creadores.
+        </p>
+      )}
+    </div>
+  );
+}
+
 function AdminSeriesPage() {
   const {
     series,
@@ -229,7 +594,7 @@ function AdminSeriesPage() {
       serie.categoria
     ]);
 
-    return uniqueOptions([...baseCategories, ...dynamicCategories]);
+    return uniqueTextOptions([...baseCategories, ...dynamicCategories]);
   }, [series]);
 
   const countryOptions = useMemo(() => {
@@ -238,13 +603,13 @@ function AdminSeriesPage() {
       serie.pais
     ]);
 
-    return uniqueOptions([...baseCountries, ...dynamicCountries]);
+    return uniqueTextOptions([...baseCountries, ...dynamicCountries]);
   }, [series]);
 
   const genreOptions = useMemo(() => {
     const dynamicGenres = (series || []).map((serie) => serie.genero);
 
-    return uniqueOptions([...baseGenres, ...dynamicGenres]);
+    return uniqueTextOptions([...baseGenres, ...dynamicGenres]);
   }, [series]);
 
   const authorOptions = useMemo(() => {
@@ -263,12 +628,16 @@ function AdminSeriesPage() {
       return [...creators, ...authorText];
     });
 
-    return uniqueOptions(dynamicAuthors);
+    return uniqueTextOptions(dynamicAuthors);
   }, [series]);
 
-  const previewImages = useMemo(() => {
-    return [...coverImages, ...carouselImages].map(getImageSource).filter(Boolean);
-  }, [coverImages, carouselImages]);
+  const coverPreviewImages = useMemo(() => {
+    return coverImages.map(getImageSource).filter(Boolean);
+  }, [coverImages]);
+
+  const carouselPreviewImages = useMemo(() => {
+    return carouselImages.map(getImageSource).filter(Boolean);
+  }, [carouselImages]);
 
   const resetForm = () => {
     setForm(initialForm);
@@ -282,7 +651,12 @@ function AdminSeriesPage() {
 
   const openCreateForm = () => {
     setMessage("");
-    resetForm();
+    setEditingSeries(null);
+    setForm(initialForm);
+    setCoverImages([]);
+    setCarouselImages([]);
+    setSelectedAuthors([]);
+    setAuthorDraft("");
     setView("form");
   };
 
@@ -290,9 +664,8 @@ function AdminSeriesPage() {
     setMessage("");
     setEditingSeries(serie);
 
-    const images = getSeriesImages(serie);
-    const coverImage = getImageSource(serie.imagen) || images[0] || "";
-    const additionalImages = images.filter((image) => image !== coverImage);
+    const coverImage = getCoverImageFromSerie(serie);
+    const additionalImages = getAdditionalImagesFromSerie(serie);
 
     const authors = Array.isArray(serie.creadoresNombre)
       ? serie.creadoresNombre
@@ -342,56 +715,11 @@ function AdminSeriesPage() {
     }));
   };
 
-  const handleAddAuthor = (authorName) => {
-    const cleanAuthor = authorName?.trim();
-
-    if (!cleanAuthor) return;
-
-    setSelectedAuthors((currentAuthors) => {
-      const exists = currentAuthors.some(
-        (author) => normalizeText(author) === normalizeText(cleanAuthor)
-      );
-
-      if (exists) return currentAuthors;
-
-      return [...currentAuthors, cleanAuthor];
-    });
-
-    setAuthorDraft("");
-  };
-
-  const handleRemoveAuthor = (authorName) => {
-    setSelectedAuthors((currentAuthors) =>
-      currentAuthors.filter(
-        (author) => normalizeText(author) !== normalizeText(authorName)
-      )
-    );
-  };
-
-  const prepareSeriesImages = async () => {
-    const preparedCoverImages = await prepareProductImagesForSave(coverImages);
-    const preparedCarouselImages = await prepareProductImagesForSave(
-      carouselImages
-    );
-
-    const allImages = [...preparedCoverImages, ...preparedCarouselImages];
-
-    const seenImages = new Set();
-
-    return allImages.filter((image) => {
-      const source = getImageSource(image);
-
-      if (!source || seenImages.has(source)) return false;
-
-      seenImages.add(source);
-      return true;
-    });
-  };
-
   const buildPayload = async () => {
-    const preparedImages = await prepareSeriesImages();
-    const mainImage = getImageSource(preparedImages[0]);
+    const preparedCoverImages = await prepareImagesForPayload(coverImages);
+    const preparedCarouselImages = await prepareImagesForPayload(carouselImages);
 
+    const coverImage = preparedCoverImages[0] || "";
     const categoryName = form.categoriaNombre.trim() || "Manhwa";
     const originName = form.origenNombre.trim() || "Corea";
 
@@ -399,8 +727,8 @@ function AdminSeriesPage() {
       nombre: form.nombre.trim(),
       descripcion: form.descripcion.trim(),
 
-      imagen: mainImage,
-      imagenes: preparedImages,
+      imagen: coverImage,
+      imagenes: preparedCarouselImages,
 
       categoriaPrincipalNombre: categoryName,
       categoriaNombre: categoryName,
@@ -440,8 +768,13 @@ function AdminSeriesPage() {
       return;
     }
 
-    if (coverImages.length === 0 && carouselImages.length === 0) {
-      setMessage("Sube al menos una imagen para la portada o el carrusel.");
+    if (!form.genero.trim()) {
+      setMessage("Selecciona o crea un género.");
+      return;
+    }
+
+    if (coverImages.length === 0) {
+      setMessage("Sube una imagen principal para la portada.");
       return;
     }
 
@@ -512,7 +845,7 @@ function AdminSeriesPage() {
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
               Crea series con categoría, país/origen, género, varios autores y
-              varias imágenes para portada y carrusel.
+              carga real de imágenes. La portada no se mezcla con el carrusel.
             </p>
           </div>
 
@@ -611,7 +944,7 @@ function AdminSeriesPage() {
               />
             </label>
 
-            <CreatableSelect
+            <CreatableDropdown
               label="Categoría"
               value={form.categoriaNombre}
               onChange={(value) =>
@@ -621,15 +954,12 @@ function AdminSeriesPage() {
                 }))
               }
               options={categoryOptions}
-              onCreate={(name) => makeOption(name)}
               placeholder="Busca o escribe una categoría"
-              emptyLabel="Sin categoría"
-              emptyCreateLabel="Agregar categoría"
               createLabel={(name) => `Agregar “${name}” a Categoría`}
               helperText="Ejemplo: Manga, Manhwa, Manhua, Novela o Webtoon."
             />
 
-            <CreatableSelect
+            <CreatableDropdown
               label="País / origen"
               value={form.origenNombre}
               onChange={(value) =>
@@ -639,15 +969,12 @@ function AdminSeriesPage() {
                 }))
               }
               options={countryOptions}
-              onCreate={(name) => makeOption(name)}
               placeholder="Busca o escribe un país/origen"
-              emptyLabel="Sin país/origen"
-              emptyCreateLabel="Agregar país/origen"
               createLabel={(name) => `Agregar “${name}” a País`}
-              helperText="Si no es China, Corea, Japón o Variado, puedes escribir otro país y agregarlo."
+              helperText="Si no es China, Corea, Japón o Variado, escribe otro país/origen y agrégalo."
             />
 
-            <CreatableSelect
+            <CreatableDropdown
               label="Género"
               value={form.genero}
               onChange={(value) =>
@@ -657,10 +984,7 @@ function AdminSeriesPage() {
                 }))
               }
               options={genreOptions}
-              onCreate={(name) => makeOption(name)}
               placeholder="Busca o escribe un género"
-              emptyLabel="Sin género"
-              emptyCreateLabel="Agregar género"
               createLabel={(name) => `Agregar “${name}” a Género`}
               helperText="Ejemplo: BL, romance, fantasía, drama o isekai."
             />
@@ -701,57 +1025,13 @@ function AdminSeriesPage() {
               </label>
             </div>
 
-            <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
-              <p className="font-black">Autores / Creadores</p>
-
-              <p className="mt-1 text-sm text-gray-600 leading-6">
-                Una serie puede tener más de un autor/creador. Si escribes uno
-                nuevo, se agregará a la lista y quedará enlazado a esta serie.
-              </p>
-
-              <div className="mt-4">
-                <CreatableSelect
-                  label="Agregar autor/creador"
-                  value={authorDraft}
-                  onChange={handleAddAuthor}
-                  options={authorOptions}
-                  onCreate={(name) => makeOption(name)}
-                  placeholder="Busca o escribe un autor/creador"
-                  emptyLabel="Seleccionar autor/creador"
-                  emptyCreateLabel="Agregar autor/creador"
-                  createLabel={(name) =>
-                    `Agregar “${name}” a Autores / Creadores`
-                  }
-                  helperText="Puedes seleccionar uno existente o escribir uno nuevo."
-                />
-              </div>
-
-              {selectedAuthors.length > 0 ? (
-                <div className="mt-4 flex flex-wrap gap-2">
-                  {selectedAuthors.map((author) => (
-                    <span
-                      key={author}
-                      className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black"
-                    >
-                      {author}
-
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveAuthor(author)}
-                        className="text-red-500"
-                        title="Quitar autor"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </span>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-4 text-sm text-gray-500">
-                  Todavía no agregaste autores/creadores.
-                </p>
-              )}
-            </div>
+            <AuthorSelector
+              authorDraft={authorDraft}
+              setAuthorDraft={setAuthorDraft}
+              selectedAuthors={selectedAuthors}
+              setSelectedAuthors={setSelectedAuthors}
+              authorOptions={authorOptions}
+            />
 
             <label className="grid gap-2 text-sm font-black lg:col-span-2">
               Descripción
@@ -769,14 +1049,14 @@ function AdminSeriesPage() {
               <p className="font-black">Portada principal</p>
 
               <p className="mt-1 text-sm text-gray-600 leading-6">
-                Esta será la primera imagen del carrusel y la portada de la
-                serie. Usa la misma compresión y recorte que los productos.
+                Esta imagen se usará como portada principal. No se mezclará con
+                el carrusel.
               </p>
 
               <div className="mt-4">
                 <ImageDropzone
                   label="Subir portada"
-                  description="Arrastra o selecciona una imagen. El sistema comprimirá y preparará el recorte final."
+                  description="Arrastra o selecciona una imagen. Se comprimirá y podrás ajustar el recorte."
                   images={coverImages}
                   setImages={setCoverImages}
                   multiple={false}
@@ -788,8 +1068,8 @@ function AdminSeriesPage() {
               <p className="font-black">Imágenes adicionales del carrusel</p>
 
               <p className="mt-1 text-sm text-gray-600 leading-6">
-                Estas imágenes acompañarán a la portada en el carrusel
-                automático. Se moverán cada 6 segundos y también con flechas.
+                Estas imágenes son solo para el carrusel. No reemplazan la
+                portada.
               </p>
 
               <div className="mt-4">
@@ -803,19 +1083,40 @@ function AdminSeriesPage() {
               </div>
             </div>
 
-            <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
-              <p className="font-black">Vista previa del carrusel</p>
+            <div className="lg:col-span-2 grid gap-5 lg:grid-cols-2">
+              <div className="rounded-[28px] bg-[#F8F6F7] p-5">
+                <p className="font-black">Vista previa de portada</p>
 
-              <p className="mt-1 text-sm text-gray-600">
-                Así se verá la portada junto con las imágenes adicionales.
-              </p>
+                <p className="mt-1 text-sm text-gray-600">
+                  Esta vista muestra únicamente la portada.
+                </p>
 
-              <div className="mt-4">
-                <AutoCarousel
-                  images={previewImages}
-                  alt={form.nombre || "Serie Smika"}
-                  heightClassName="h-72"
-                />
+                <div className="mt-4">
+                  <PreviewCarousel
+                    images={coverPreviewImages}
+                    alt={`${form.nombre || "Serie Smika"} portada`}
+                    heightClassName="h-72"
+                    autoPlay={false}
+                    showDots={false}
+                  />
+                </div>
+              </div>
+
+              <div className="rounded-[28px] bg-[#F8F6F7] p-5">
+                <p className="font-black">Vista previa del carrusel</p>
+
+                <p className="mt-1 text-sm text-gray-600">
+                  Aquí solo van las imágenes adicionales. Se moverán cada 6
+                  segundos y con flechas.
+                </p>
+
+                <div className="mt-4">
+                  <PreviewCarousel
+                    images={carouselPreviewImages}
+                    alt={`${form.nombre || "Serie Smika"} carrusel`}
+                    heightClassName="h-72"
+                  />
+                </div>
               </div>
             </div>
           </div>
@@ -830,6 +1131,7 @@ function AdminSeriesPage() {
                 size={42}
                 className="mx-auto animate-spin text-[#87CCC8]"
               />
+
               <p className="mt-4 font-black">Cargando series...</p>
             </div>
           ) : sortedSeries.length === 0 ? (
@@ -847,19 +1149,28 @@ function AdminSeriesPage() {
           ) : (
             <div className="grid gap-6 xl:grid-cols-3">
               {sortedSeries.map((serie) => {
-                const serieImages = getSeriesImages(serie);
+                const coverImage = getCoverImageFromSerie(serie);
+                const additionalImages = getAdditionalImagesFromSerie(serie);
 
                 return (
                   <article
                     key={getId(serie)}
                     className="rounded-[28px] bg-white border border-[#87CCC8]/20 smika-shadow overflow-hidden"
                   >
-                    <AutoCarousel
-                      images={serieImages}
-                      alt={serie.nombre}
-                      heightClassName="h-44"
-                      className="rounded-none"
-                    />
+                    <div className="h-44 bg-[#F8F6F7]">
+                      {coverImage ? (
+                        <img
+                          src={coverImage}
+                          alt={serie.nombre}
+                          className="h-full w-full object-contain"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="h-full flex items-center justify-center text-gray-400">
+                          <ImageIcon size={36} />
+                        </div>
+                      )}
+                    </div>
 
                     <div className="p-6">
                       <div className="flex flex-wrap gap-2">
@@ -906,7 +1217,13 @@ function AdminSeriesPage() {
                         </p>
 
                         <p>
-                          <strong>Imágenes:</strong> {serieImages.length}
+                          <strong>Portada:</strong>{" "}
+                          {coverImage ? "Sí" : "No"}
+                        </p>
+
+                        <p>
+                          <strong>Imágenes carrusel:</strong>{" "}
+                          {additionalImages.length}
                         </p>
                       </div>
 
