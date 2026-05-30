@@ -4,6 +4,7 @@ import {
   Bell,
   CalendarDays,
   Heart,
+  Image as ImageIcon,
   Loader2,
   RefreshCw
 } from "lucide-react";
@@ -27,6 +28,25 @@ function getId(item) {
   return item?._id || item?.id || "";
 }
 
+function getImageSource(image) {
+  if (!image) return "";
+
+  if (typeof image === "string") return image;
+
+  if (typeof image === "object") {
+    return (
+      image.finalPreview ||
+      image.url ||
+      image.preview ||
+      image.src ||
+      image.imagen ||
+      ""
+    );
+  }
+
+  return "";
+}
+
 function getEventTitle(event) {
   return event?.titulo || event?.nombre || event?.title || "Evento Smika";
 }
@@ -35,22 +55,26 @@ function getEventSlug(event) {
   return event?.slug || createSlug(getEventTitle(event) || getId(event));
 }
 
-function getEventImages(event) {
+function getEventCoverImage(event) {
+  return getImageSource(event?.imagen);
+}
+
+function getEventCarouselImages(event) {
+  const coverImage = getEventCoverImage(event);
+
   const images = Array.isArray(event?.imagenes)
-    ? event.imagenes.filter(Boolean)
+    ? event.imagenes.map(getImageSource).filter(Boolean)
     : [];
 
-  if (event?.imagen && !images.includes(event.imagen)) {
-    images.unshift(event.imagen);
+  return images.filter((image) => image !== coverImage);
+}
+
+function getEventSeriesText(event) {
+  if (Array.isArray(event?.seriesNombre) && event.seriesNombre.length > 0) {
+    return event.seriesNombre.join(", ");
   }
 
-  if (Array.isArray(event?.images)) {
-    event.images.forEach((image) => {
-      if (image && !images.includes(image)) images.push(image);
-    });
-  }
-
-  return images;
+  return event?.serieNombre || event?.series || "Sin serie fija";
 }
 
 function formatDate(value) {
@@ -120,9 +144,9 @@ function EventSchedulePage() {
             <h2 className="text-4xl font-black">Eventos actuales y próximos</h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Revisa los eventos disponibles, sus imágenes y los productos
-              vinculados. Las imágenes se desplazan automáticamente cada 6
-              segundos y también puedes moverlas con flechas.
+              Revisa los eventos disponibles. La portada se muestra por separado
+              y el carrusel solo aparece cuando el evento tiene imágenes
+              adicionales.
             </p>
           </div>
 
@@ -167,19 +191,28 @@ function EventSchedulePage() {
           {activeEvents.map((event) => {
             const title = getEventTitle(event);
             const slug = getEventSlug(event);
-            const images = getEventImages(event);
+            const coverImage = getEventCoverImage(event);
+            const carouselImages = getEventCarouselImages(event);
 
             return (
               <article
                 key={getId(event) || slug}
                 className="smika-card smika-shadow overflow-hidden"
               >
-                <AutoCarousel
-                  images={images}
-                  alt={title}
-                  heightClassName="h-72"
-                  className="rounded-none"
-                />
+                <div className="h-72 bg-[#F8F6F7]">
+                  {coverImage ? (
+                    <img
+                      src={coverImage}
+                      alt={`${title} portada`}
+                      className="h-full w-full object-contain"
+                      loading="lazy"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-gray-400">
+                      <ImageIcon size={42} />
+                    </div>
+                  )}
+                </div>
 
                 <div className="p-6">
                   <div className="flex flex-wrap gap-2 text-xs font-black">
@@ -188,8 +221,14 @@ function EventSchedulePage() {
                     </span>
 
                     <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1">
-                      {event.pais || event.countryCode || "V"}
+                      {event.origenNombre || event.pais || "Variado"}
                     </span>
+
+                    {event.tipoEvento && (
+                      <span className="rounded-full bg-white px-3 py-1">
+                        {event.tipoEvento}
+                      </span>
+                    )}
 
                     {event.destacado && (
                       <span className="rounded-full bg-white px-3 py-1">
@@ -208,16 +247,12 @@ function EventSchedulePage() {
 
                   <div className="mt-4 grid gap-2 text-sm text-gray-600">
                     <p>
-                      <strong>Serie:</strong>{" "}
-                      {event.serieNombre || event.series || "Sin serie fija"}
+                      <strong>Series:</strong> {getEventSeriesText(event)}
                     </p>
 
                     <p>
                       <strong>País/origen:</strong>{" "}
-                      {event.origenNombre ||
-                        event.country ||
-                        event.countryCode ||
-                        "Variado"}
+                      {event.origenNombre || event.pais || "Variado"}
                     </p>
 
                     <p>
@@ -226,9 +261,21 @@ function EventSchedulePage() {
                     </p>
 
                     <p>
-                      <strong>Imágenes:</strong> {images.length}
+                      <strong>Imágenes carrusel:</strong>{" "}
+                      {carouselImages.length}
                     </p>
                   </div>
+
+                  {carouselImages.length > 0 && (
+                    <div className="mt-5">
+                      <AutoCarousel
+                        images={carouselImages}
+                        alt={`${title} carrusel`}
+                        heightClassName="h-48"
+                        fit="contain"
+                      />
+                    </div>
+                  )}
 
                   <div className="mt-6 flex flex-wrap gap-3">
                     <Link

@@ -1,8 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
   Image as ImageIcon,
   Loader2,
   Pencil,
@@ -14,6 +12,7 @@ import {
   UsersRound
 } from "lucide-react";
 
+import AutoCarousel from "../../components/common/AutoCarousel";
 import ImageDropzone from "../../components/admin/ImageDropzone";
 import { useAdminData } from "../../context/AdminDataContext";
 
@@ -143,23 +142,6 @@ async function prepareImagesForPayload(images = []) {
     });
 }
 
-function getCountryCodeFromOrigin(originName = "") {
-  const cleanOrigin = normalizeText(originName);
-
-  if (cleanOrigin === "china") return "CN";
-  if (cleanOrigin === "corea") return "KR";
-  if (cleanOrigin === "japon" || cleanOrigin === "japón") return "JP";
-  if (cleanOrigin === "variado") return "V";
-
-  return originName.trim();
-}
-
-function getSeriesStatus(serie) {
-  if (serie.activo === false || serie.activa === false) return "Inactiva";
-  if (serie.destacada) return "Destacada";
-  return "Activa";
-}
-
 function uniqueTextOptions(values = []) {
   const map = new Map();
 
@@ -175,6 +157,23 @@ function uniqueTextOptions(values = []) {
     });
 
   return [...map.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function getCountryCodeFromOrigin(originName = "") {
+  const cleanOrigin = normalizeText(originName);
+
+  if (cleanOrigin === "china") return "CN";
+  if (cleanOrigin === "corea") return "KR";
+  if (cleanOrigin === "japon" || cleanOrigin === "japón") return "JP";
+  if (cleanOrigin === "variado") return "V";
+
+  return originName.trim();
+}
+
+function getSeriesStatus(serie) {
+  if (serie.activo === false || serie.activa === false) return "Inactiva";
+  if (serie.destacada) return "Destacada";
+  return "Activa";
 }
 
 function getCoverImageFromSerie(serie) {
@@ -196,173 +195,33 @@ function createEditableImageFromSource(src, index = 0) {
     id: `serie-image-${Date.now()}-${index}-${Math.random()}`,
     name: `imagen-serie-${index + 1}.jpg`,
     originalName: `imagen-serie-${index + 1}.jpg`,
-
     preview: src,
     finalPreview: src,
     url: src,
-
     size: 0,
     originalSize: 0,
     compressedSize: 0,
     finalSize: 0,
-
     width: 1200,
     height: 900,
     finalWidth: 1200,
     finalHeight: 900,
-
     crop: {
       x: 0,
       y: 0,
       width: 100,
       height: 100
     },
-
     zoom: 1,
-
     pan: {
       x: 0,
       y: 0
     },
-
     finalQuality: 0.92,
     finalType: "image/jpeg",
     finalCompressed: true,
     storage: "existing"
   };
-}
-
-function PreviewCarousel({
-  images = [],
-  alt = "Imagen",
-  heightClassName = "h-72",
-  autoPlay = true,
-  showDots = true
-}) {
-  const normalizedImages = useMemo(() => {
-    return images.map(getImageSource).filter(Boolean);
-  }, [images]);
-
-  const [currentIndex, setCurrentIndex] = useState(0);
-
-  const totalImages = normalizedImages.length;
-  const hasMultipleImages = totalImages > 1;
-
-  const goToPrevious = () => {
-    if (!hasMultipleImages) return;
-
-    setCurrentIndex((current) =>
-      current === 0 ? totalImages - 1 : current - 1
-    );
-  };
-
-  const goToNext = () => {
-    if (!hasMultipleImages) return;
-
-    setCurrentIndex((current) =>
-      current === totalImages - 1 ? 0 : current + 1
-    );
-  };
-
-  useEffect(() => {
-    if (!autoPlay || !hasMultipleImages) return undefined;
-
-    const timer = window.setInterval(() => {
-      setCurrentIndex((current) =>
-        current === totalImages - 1 ? 0 : current + 1
-      );
-    }, 6000);
-
-    return () => window.clearInterval(timer);
-  }, [autoPlay, hasMultipleImages, totalImages]);
-
-  useEffect(() => {
-    if (currentIndex > totalImages - 1) {
-      setCurrentIndex(0);
-    }
-  }, [currentIndex, totalImages]);
-
-  if (totalImages === 0) {
-    return (
-      <div
-        className={`${heightClassName} flex items-center justify-center rounded-[28px] bg-white text-gray-400`}
-      >
-        <div className="text-center">
-          <ImageIcon size={38} className="mx-auto" />
-          <p className="mt-2 text-sm font-black">Sin imágenes</p>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div
-      className={`${heightClassName} relative overflow-hidden rounded-[28px] bg-white`}
-    >
-      <div
-        className="flex h-full transition-transform duration-700 ease-in-out"
-        style={{
-          width: `${totalImages * 100}%`,
-          transform: `translateX(-${currentIndex * (100 / totalImages)}%)`
-        }}
-      >
-        {normalizedImages.map((image, index) => (
-          <div
-            key={`${image}-${index}`}
-            className="h-full shrink-0 bg-white"
-            style={{ width: `${100 / totalImages}%` }}
-          >
-            <img
-              src={image}
-              alt={`${alt} ${index + 1}`}
-              className="h-full w-full object-contain"
-              loading="lazy"
-            />
-          </div>
-        ))}
-      </div>
-
-      {hasMultipleImages && (
-        <>
-          <button
-            type="button"
-            onClick={goToPrevious}
-            className="absolute left-3 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow-md"
-            aria-label="Imagen anterior"
-          >
-            <ChevronLeft size={22} />
-          </button>
-
-          <button
-            type="button"
-            onClick={goToNext}
-            className="absolute right-3 top-1/2 z-10 flex h-10 w-10 -translate-y-1/2 items-center justify-center rounded-full bg-white/90 shadow-md"
-            aria-label="Imagen siguiente"
-          >
-            <ChevronRight size={22} />
-          </button>
-        </>
-      )}
-
-      {showDots && hasMultipleImages && (
-        <div className="absolute bottom-3 left-1/2 z-10 flex -translate-x-1/2 gap-2 rounded-full bg-white/70 px-3 py-2 backdrop-blur">
-          {normalizedImages.map((image, index) => (
-            <button
-              key={`dot-${image}-${index}`}
-              type="button"
-              onClick={() => setCurrentIndex(index)}
-              className={`h-2.5 rounded-full transition-all ${
-                index === currentIndex
-                  ? "w-7 bg-[#87CCC8]"
-                  : "w-2.5 bg-[#D1B0C7]"
-              }`}
-              aria-label={`Ir a imagen ${index + 1}`}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 function CreatableDropdown({
@@ -510,7 +369,7 @@ function AuthorSelector({
           options={availableAuthors}
           placeholder="Busca o escribe un autor/creador"
           createLabel={(name) => `Agregar “${name}” a Autores / Creadores`}
-          helperText="Presiona el botón de agregar o Enter para añadirlo a la serie."
+          helperText="Escribe o selecciona y luego presiona Agregar."
         />
 
         <button
@@ -574,6 +433,8 @@ function AdminSeriesPage() {
 
   const [coverImages, setCoverImages] = useState([]);
   const [carouselImages, setCarouselImages] = useState([]);
+  const [imagesTouched, setImagesTouched] = useState(false);
+
   const [selectedAuthors, setSelectedAuthors] = useState([]);
   const [authorDraft, setAuthorDraft] = useState("");
 
@@ -639,11 +500,26 @@ function AdminSeriesPage() {
     return carouselImages.map(getImageSource).filter(Boolean);
   }, [carouselImages]);
 
+  const setCoverImagesTouched = (updater) => {
+    setImagesTouched(true);
+    setCoverImages((currentImages) =>
+      typeof updater === "function" ? updater(currentImages) : updater
+    );
+  };
+
+  const setCarouselImagesTouched = (updater) => {
+    setImagesTouched(true);
+    setCarouselImages((currentImages) =>
+      typeof updater === "function" ? updater(currentImages) : updater
+    );
+  };
+
   const resetForm = () => {
     setForm(initialForm);
     setEditingSeries(null);
     setCoverImages([]);
     setCarouselImages([]);
+    setImagesTouched(false);
     setSelectedAuthors([]);
     setAuthorDraft("");
     setView("list");
@@ -655,6 +531,7 @@ function AdminSeriesPage() {
     setForm(initialForm);
     setCoverImages([]);
     setCarouselImages([]);
+    setImagesTouched(false);
     setSelectedAuthors([]);
     setAuthorDraft("");
     setView("form");
@@ -701,6 +578,7 @@ function AdminSeriesPage() {
       )
     );
 
+    setImagesTouched(false);
     setSelectedAuthors([...new Set(authors)]);
     setAuthorDraft("");
     setView("form");
@@ -716,19 +594,12 @@ function AdminSeriesPage() {
   };
 
   const buildPayload = async () => {
-    const preparedCoverImages = await prepareImagesForPayload(coverImages);
-    const preparedCarouselImages = await prepareImagesForPayload(carouselImages);
-
-    const coverImage = preparedCoverImages[0] || "";
     const categoryName = form.categoriaNombre.trim() || "Manhwa";
     const originName = form.origenNombre.trim() || "Corea";
 
-    return {
+    const payload = {
       nombre: form.nombre.trim(),
       descripcion: form.descripcion.trim(),
-
-      imagen: coverImage,
-      imagenes: preparedCarouselImages,
 
       categoriaPrincipalNombre: categoryName,
       categoriaNombre: categoryName,
@@ -748,6 +619,19 @@ function AdminSeriesPage() {
 
       orden: Number(form.orden || 0)
     };
+
+    if (!editingSeries || imagesTouched) {
+      const preparedCoverImages = await prepareImagesForPayload(coverImages);
+      const preparedCarouselImages = await prepareImagesForPayload(
+        carouselImages
+      );
+
+      payload.imagen = preparedCoverImages[0] || "";
+      payload.imagenes = preparedCarouselImages;
+      payload.imagenesTouched = true;
+    }
+
+    return payload;
   };
 
   const handleSubmit = async (event) => {
@@ -773,7 +657,7 @@ function AdminSeriesPage() {
       return;
     }
 
-    if (coverImages.length === 0) {
+    if (!editingSeries && coverImages.length === 0) {
       setMessage("Sube una imagen principal para la portada.");
       return;
     }
@@ -781,8 +665,8 @@ function AdminSeriesPage() {
     setSaving(true);
     setMessage(
       editingSeries
-        ? "Procesando imágenes y actualizando serie..."
-        : "Procesando imágenes y creando serie..."
+        ? "Guardando cambios de la serie..."
+        : "Creando serie..."
     );
 
     try {
@@ -1058,7 +942,7 @@ function AdminSeriesPage() {
                   label="Subir portada"
                   description="Arrastra o selecciona una imagen. Se comprimirá y podrás ajustar el recorte."
                   images={coverImages}
-                  setImages={setCoverImages}
+                  setImages={setCoverImagesTouched}
                   multiple={false}
                 />
               </div>
@@ -1068,8 +952,8 @@ function AdminSeriesPage() {
               <p className="font-black">Imágenes adicionales del carrusel</p>
 
               <p className="mt-1 text-sm text-gray-600 leading-6">
-                Estas imágenes son solo para el carrusel. No reemplazan la
-                portada.
+                Estas imágenes son solo para el carrusel. Si no subes imágenes
+                adicionales, no aparecerá carrusel.
               </p>
 
               <div className="mt-4">
@@ -1077,7 +961,7 @@ function AdminSeriesPage() {
                   label="Subir imágenes adicionales"
                   description="Puedes subir varias imágenes. Cada una se comprimirá y podrá recortarse."
                   images={carouselImages}
-                  setImages={setCarouselImages}
+                  setImages={setCarouselImagesTouched}
                   multiple
                 />
               </div>
@@ -1091,14 +975,18 @@ function AdminSeriesPage() {
                   Esta vista muestra únicamente la portada.
                 </p>
 
-                <div className="mt-4">
-                  <PreviewCarousel
-                    images={coverPreviewImages}
-                    alt={`${form.nombre || "Serie Smika"} portada`}
-                    heightClassName="h-72"
-                    autoPlay={false}
-                    showDots={false}
-                  />
+                <div className="mt-4 h-72 overflow-hidden rounded-[28px] bg-white">
+                  {coverPreviewImages.length > 0 ? (
+                    <img
+                      src={coverPreviewImages[0]}
+                      alt={`${form.nombre || "Serie Smika"} portada`}
+                      className="h-full w-full object-contain"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-gray-400">
+                      <ImageIcon size={38} />
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -1106,15 +994,17 @@ function AdminSeriesPage() {
                 <p className="font-black">Vista previa del carrusel</p>
 
                 <p className="mt-1 text-sm text-gray-600">
-                  Aquí solo van las imágenes adicionales. Se moverán cada 6
-                  segundos y con flechas.
+                  Aquí solo van las imágenes adicionales. Si no hay adicionales,
+                  no se mostrará carrusel.
                 </p>
 
                 <div className="mt-4">
-                  <PreviewCarousel
+                  <AutoCarousel
                     images={carouselPreviewImages}
                     alt={`${form.nombre || "Serie Smika"} carrusel`}
                     heightClassName="h-72"
+                    fit="contain"
+                    showEmpty
                   />
                 </div>
               </div>
@@ -1217,8 +1107,7 @@ function AdminSeriesPage() {
                         </p>
 
                         <p>
-                          <strong>Portada:</strong>{" "}
-                          {coverImage ? "Sí" : "No"}
+                          <strong>Portada:</strong> {coverImage ? "Sí" : "No"}
                         </p>
 
                         <p>

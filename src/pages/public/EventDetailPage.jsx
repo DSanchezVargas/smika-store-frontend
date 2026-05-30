@@ -4,6 +4,7 @@ import {
   Bell,
   CalendarDays,
   Heart,
+  Image as ImageIcon,
   Settings,
   SlidersHorizontal
 } from "lucide-react";
@@ -38,6 +39,25 @@ function getId(item) {
   return item?._id || item?.id || "";
 }
 
+function getImageSource(image) {
+  if (!image) return "";
+
+  if (typeof image === "string") return image;
+
+  if (typeof image === "object") {
+    return (
+      image.finalPreview ||
+      image.url ||
+      image.preview ||
+      image.src ||
+      image.imagen ||
+      ""
+    );
+  }
+
+  return "";
+}
+
 function getEventTitle(event) {
   return event?.titulo || event?.nombre || event?.title || "Evento Smika";
 }
@@ -46,22 +66,34 @@ function getEventSlug(event) {
   return event?.slug || createSlug(getEventTitle(event) || getId(event));
 }
 
-function getEventImages(event) {
+function getEventCoverImage(event) {
+  return getImageSource(event?.imagen);
+}
+
+function getEventCarouselImages(event) {
+  const coverImage = getEventCoverImage(event);
+
   const images = Array.isArray(event?.imagenes)
-    ? event.imagenes.filter(Boolean)
+    ? event.imagenes.map(getImageSource).filter(Boolean)
     : [];
 
-  if (event?.imagen && !images.includes(event.imagen)) {
-    images.unshift(event.imagen);
+  return images.filter((image) => image !== coverImage);
+}
+
+function getEventSeries(event) {
+  if (Array.isArray(event?.seriesNombre) && event.seriesNombre.length > 0) {
+    return event.seriesNombre;
   }
 
-  if (Array.isArray(event?.images)) {
-    event.images.forEach((image) => {
-      if (image && !images.includes(image)) images.push(image);
-    });
-  }
+  if (event?.serieNombre) return [event.serieNombre];
 
-  return images;
+  return [];
+}
+
+function getEventSeriesText(event) {
+  const series = getEventSeries(event);
+
+  return series.length > 0 ? series.join(", ") : "Sin serie fija";
 }
 
 function getProductId(product) {
@@ -112,10 +144,7 @@ function productBelongsToEvent(product, event) {
   if (eventId && productEventId === eventId) return true;
   if (eventSlug && productEventSlug === eventSlug) return true;
 
-  return (
-    normalizeText(productEventName) === normalizeText(eventTitle) ||
-    normalizeText(productEventName) === normalizeText(event.serieNombre || "")
-  );
+  return normalizeText(productEventName) === normalizeText(eventTitle);
 }
 
 function formatDate(value) {
@@ -185,9 +214,7 @@ function EventDetailPage() {
   }, [products, event]);
 
   const productTypes = useMemo(() => {
-    return [
-      ...new Set(eventProducts.map(getProductType).filter(Boolean))
-    ];
+    return [...new Set(eventProducts.map(getProductType).filter(Boolean))];
   }, [eventProducts]);
 
   const visibleProducts = useMemo(() => {
@@ -225,7 +252,8 @@ function EventDetailPage() {
 
   const eventTitle = getEventTitle(event);
   const eventSlug = getEventSlug(event);
-  const eventImages = getEventImages(event);
+  const coverImage = getEventCoverImage(event);
+  const carouselImages = getEventCarouselImages(event);
 
   return (
     <section className="container-smika py-12">
@@ -246,31 +274,47 @@ function EventDetailPage() {
           </span>
 
           <span className="rounded-full bg-white px-4 py-2">
-            Serie fija: {event.serieNombre || event.series || "Sin serie"}
+            Tipo: {event.tipoEvento || "Otro"}
           </span>
 
           <span className="rounded-full bg-white px-4 py-2">
-            País/origen:{" "}
-            {event.origenNombre ||
-              event.country ||
-              event.countryCode ||
-              event.pais ||
-              "Variado"}
+            Series: {getEventSeriesText(event)}
           </span>
 
           <span className="rounded-full bg-white px-4 py-2">
-            Imágenes: {eventImages.length}
+            País/origen: {event.origenNombre || event.pais || "Variado"}
           </span>
         </div>
       </div>
 
       <div className="smika-card smika-shadow overflow-hidden mb-10">
-        <AutoCarousel
-          images={eventImages}
-          alt={eventTitle}
-          heightClassName="h-[440px]"
-          className="rounded-none"
-        />
+        <div className="h-[440px] bg-[#F8F6F7]">
+          {coverImage ? (
+            <img
+              src={coverImage}
+              alt={`${eventTitle} portada`}
+              className="h-full w-full object-contain"
+              loading="lazy"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center text-gray-400">
+              <ImageIcon size={52} />
+            </div>
+          )}
+        </div>
+
+        {carouselImages.length > 0 && (
+          <div className="border-t border-[#87CCC8]/20 p-5">
+            <p className="mb-3 font-black">Galería del evento</p>
+
+            <AutoCarousel
+              images={carouselImages}
+              alt={`${eventTitle} carrusel`}
+              heightClassName="h-72"
+              fit="contain"
+            />
+          </div>
+        )}
 
         <div className="p-6 flex flex-wrap items-center justify-between gap-4">
           <div>
@@ -326,15 +370,15 @@ function EventDetailPage() {
 
           <div className="mt-6 grid gap-5">
             <div className="rounded-3xl bg-[#F7D9D8]/50 p-4">
-              <p className="text-sm font-black">Serie fija del evento</p>
+              <p className="text-sm font-black">Series relacionadas</p>
 
               <p className="mt-1 text-sm text-gray-600">
-                {event.serieNombre || event.series || "Sin serie definida"}
+                {getEventSeriesText(event)}
               </p>
 
               <p className="mt-2 text-xs text-gray-500 leading-5">
-                No se muestra filtro de serie porque este evento ya pertenece a
-                una historia/serie definida.
+                No se muestra filtro de serie porque este evento ya tiene sus
+                series relacionadas definidas.
               </p>
             </div>
 

@@ -29,7 +29,8 @@ function AutoCarousel({
   interval = 6000,
   autoPlay = true,
   showDots = true,
-  fit = "contain"
+  fit = "contain",
+  showEmpty = false
 }) {
   const normalizedImages = useMemo(() => {
     return images.map(getImageSource).filter(Boolean);
@@ -76,7 +77,11 @@ function AutoCarousel({
     }
   }, [currentIndex, totalImages]);
 
-  if (totalImages === 0) {
+  if (totalImages === 0 && !showEmpty) {
+    return null;
+  }
+
+  if (totalImages === 0 && showEmpty) {
     return (
       <div
         className={`relative flex ${heightClassName} items-center justify-center overflow-hidden rounded-[28px] bg-[#F8F6F7] ${className}`}
