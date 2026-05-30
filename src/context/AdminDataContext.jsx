@@ -35,6 +35,20 @@ import {
   updateCategory as apiUpdateCategory
 } from "../services/categoryService";
 
+import {
+  createCreator as apiCreateCreator,
+  deleteCreator as apiDeleteCreator,
+  getCreators as apiGetCreators,
+  updateCreator as apiUpdateCreator
+} from "../services/creatorService";
+
+import {
+  createOrigin as apiCreateOrigin,
+  deleteOrigin as apiDeleteOrigin,
+  getOrigins as apiGetOrigins,
+  updateOrigin as apiUpdateOrigin
+} from "../services/originService";
+
 const AdminDataContext = createContext(null);
 
 const STORAGE_KEY = "smika_admin_data_v1";
@@ -170,6 +184,36 @@ function normalizeCategoryFromApi(category = {}) {
     orden: Number(category.orden || 0),
     activa: category.activa !== false,
     activo: category.activa !== false
+  };
+}
+
+function normalizeCreatorFromApi(creator = {}) {
+  const mongoId = getId(creator);
+
+  return {
+    ...creator,
+    id: mongoId,
+    _id: mongoId,
+    nombre: creator.nombre || creator.name || "Creador",
+    slug: creator.slug || createSlug(creator.nombre || mongoId),
+    tipo: creator.tipo || "Autor",
+    descripcion: creator.descripcion || "",
+    paisOrigen: creator.paisOrigen || "",
+    activo: creator.activo !== false
+  };
+}
+
+function normalizeOriginFromApi(origin = {}) {
+  const mongoId = getId(origin);
+
+  return {
+    ...origin,
+    id: mongoId,
+    _id: mongoId,
+    nombre: origin.nombre || origin.name || "Origen",
+    slug: origin.slug || createSlug(origin.nombre || mongoId),
+    descripcion: origin.descripcion || "",
+    activo: origin.activo !== false
   };
 }
 
@@ -464,6 +508,30 @@ function buildCategoryPayloadForApi(payload = {}) {
   };
 }
 
+function buildCreatorPayloadForApi(payload = {}) {
+  return {
+    nombre: payload.nombre || "",
+    tipo: payload.tipo || "Autor",
+    descripcion: payload.descripcion || "",
+    paisOrigen: payload.paisOrigen || "",
+    activo:
+      payload.activo !== undefined
+        ? Boolean(payload.activo)
+        : true
+  };
+}
+
+function buildOriginPayloadForApi(payload = {}) {
+  return {
+    nombre: payload.nombre || "",
+    descripcion: payload.descripcion || "",
+    activo:
+      payload.activo !== undefined
+        ? Boolean(payload.activo)
+        : true
+  };
+}
+
 function buildProductPayloadForApi(payload = {}, options = {}) {
   const precio = Number(
     payload.precioReferencial ?? payload.precio ?? payload.price ?? 0
@@ -708,6 +776,8 @@ const defaultAdminData = {
   series: [],
   characters: [],
   categories: [],
+  creators: [],
+  origins: [],
   users: []
 };
 
@@ -726,7 +796,9 @@ function getInitialAdminData() {
       events: [],
       series: [],
       characters: [],
-      categories: []
+      categories: [],
+      creators: [],
+      origins: []
     };
   } catch (error) {
     console.error("No se pudo leer la información local de Smika.", error);
@@ -743,12 +815,16 @@ export function AdminDataProvider({ children }) {
   const [eventsLoadError, setEventsLoadError] = useState("");
   const [charactersLoadError, setCharactersLoadError] = useState("");
   const [categoriesLoadError, setCategoriesLoadError] = useState("");
+  const [creatorsLoadError, setCreatorsLoadError] = useState("");
+  const [originsLoadError, setOriginsLoadError] = useState("");
 
   const [loadingProducts, setLoadingProducts] = useState(false);
   const [loadingSeries, setLoadingSeries] = useState(false);
   const [loadingEvents, setLoadingEvents] = useState(false);
   const [loadingCharacters, setLoadingCharacters] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(false);
+  const [loadingCreators, setLoadingCreators] = useState(false);
+  const [loadingOrigins, setLoadingOrigins] = useState(false);
 
   const updateCollection = (collectionName, updater) => {
     setAdminData((currentData) => {
@@ -877,7 +953,8 @@ export function AdminDataProvider({ children }) {
         activos: "false"
       });
 
-      const categoriesFromApi = data.categories || data.categorias || data.data || [];
+      const categoriesFromApi =
+        data.categories || data.categorias || data.data || [];
       const normalizedCategories = categoriesFromApi.map(normalizeCategoryFromApi);
 
       updateCollection("categories", normalizedCategories);
@@ -894,13 +971,67 @@ export function AdminDataProvider({ children }) {
     }
   };
 
+  const refreshCreators = async () => {
+    setLoadingCreators(true);
+    setCreatorsLoadError("");
+
+    try {
+      const data = await apiGetCreators({
+        activos: "false"
+      });
+
+      const creatorsFromApi = data.creators || data.creadores || data.data || [];
+      const normalizedCreators = creatorsFromApi.map(normalizeCreatorFromApi);
+
+      updateCollection("creators", normalizedCreators);
+
+      return normalizedCreators;
+    } catch (error) {
+      setCreatorsLoadError(
+        error.message || "No se pudieron cargar los creadores desde MongoDB."
+      );
+
+      return [];
+    } finally {
+      setLoadingCreators(false);
+    }
+  };
+
+  const refreshOrigins = async () => {
+    setLoadingOrigins(true);
+    setOriginsLoadError("");
+
+    try {
+      const data = await apiGetOrigins({
+        activos: "false"
+      });
+
+      const originsFromApi = data.origins || data.origenes || data.data || [];
+      const normalizedOrigins = originsFromApi.map(normalizeOriginFromApi);
+
+      updateCollection("origins", normalizedOrigins);
+
+      return normalizedOrigins;
+    } catch (error) {
+      setOriginsLoadError(
+        error.message || "No se pudieron cargar los países/orígenes desde MongoDB."
+      );
+
+      return [];
+    } finally {
+      setLoadingOrigins(false);
+    }
+  };
+
   const refreshAdminData = async () => {
     await Promise.all([
       refreshProducts(),
       refreshSeries(),
       refreshEvents(),
       refreshCharacters(),
-      refreshCategories()
+      refreshCategories(),
+      refreshCreators(),
+      refreshOrigins()
     ]);
   };
 
@@ -1239,6 +1370,148 @@ export function AdminDataProvider({ children }) {
     return enabledCategory;
   };
 
+  const createCreatorFull = async (payload) => {
+    const apiPayload = buildCreatorPayloadForApi(payload);
+    const data = await apiCreateCreator(apiPayload);
+    const createdCreator = normalizeCreatorFromApi(data.creator);
+
+    updateCollection("creators", (currentCreators) => [
+      createdCreator,
+      ...currentCreators.filter(
+        (creator) =>
+          (creator._id || creator.id) !==
+          (createdCreator._id || createdCreator.id)
+      )
+    ]);
+
+    return createdCreator;
+  };
+
+  const updateCreator = async (creatorId, payload) => {
+    const apiPayload = buildCreatorPayloadForApi(payload);
+    const data = await apiUpdateCreator(creatorId, apiPayload);
+    const updatedCreator = normalizeCreatorFromApi(data.creator);
+
+    updateCollection("creators", (currentCreators) =>
+      currentCreators.map((creator) =>
+        (creator._id || creator.id) === creatorId ? updatedCreator : creator
+      )
+    );
+
+    return updatedCreator;
+  };
+
+  const toggleCreatorStatus = async (creatorId) => {
+    const creator = adminData.creators.find(
+      (item) => (item._id || item.id) === creatorId
+    );
+
+    if (!creator) throw new Error("Creador no encontrado.");
+
+    if (creator.activo !== false) {
+      await apiDeleteCreator(creatorId);
+
+      const disabledCreator = {
+        ...creator,
+        activo: false
+      };
+
+      updateCollection("creators", (currentCreators) =>
+        currentCreators.map((item) =>
+          (item._id || item.id) === creatorId ? disabledCreator : item
+        )
+      );
+
+      return disabledCreator;
+    }
+
+    const data = await apiUpdateCreator(creatorId, {
+      ...buildCreatorPayloadForApi(creator),
+      activo: true
+    });
+
+    const enabledCreator = normalizeCreatorFromApi(data.creator);
+
+    updateCollection("creators", (currentCreators) =>
+      currentCreators.map((item) =>
+        (item._id || item.id) === creatorId ? enabledCreator : item
+      )
+    );
+
+    return enabledCreator;
+  };
+
+  const createOriginFull = async (payload) => {
+    const apiPayload = buildOriginPayloadForApi(payload);
+    const data = await apiCreateOrigin(apiPayload);
+    const createdOrigin = normalizeOriginFromApi(data.origin);
+
+    updateCollection("origins", (currentOrigins) => [
+      createdOrigin,
+      ...currentOrigins.filter(
+        (origin) =>
+          (origin._id || origin.id) !==
+          (createdOrigin._id || createdOrigin.id)
+      )
+    ]);
+
+    return createdOrigin;
+  };
+
+  const updateOrigin = async (originId, payload) => {
+    const apiPayload = buildOriginPayloadForApi(payload);
+    const data = await apiUpdateOrigin(originId, apiPayload);
+    const updatedOrigin = normalizeOriginFromApi(data.origin);
+
+    updateCollection("origins", (currentOrigins) =>
+      currentOrigins.map((origin) =>
+        (origin._id || origin.id) === originId ? updatedOrigin : origin
+      )
+    );
+
+    return updatedOrigin;
+  };
+
+  const toggleOriginStatus = async (originId) => {
+    const origin = adminData.origins.find(
+      (item) => (item._id || item.id) === originId
+    );
+
+    if (!origin) throw new Error("Origen no encontrado.");
+
+    if (origin.activo !== false) {
+      await apiDeleteOrigin(originId);
+
+      const disabledOrigin = {
+        ...origin,
+        activo: false
+      };
+
+      updateCollection("origins", (currentOrigins) =>
+        currentOrigins.map((item) =>
+          (item._id || item.id) === originId ? disabledOrigin : item
+        )
+      );
+
+      return disabledOrigin;
+    }
+
+    const data = await apiUpdateOrigin(originId, {
+      ...buildOriginPayloadForApi(origin),
+      activo: true
+    });
+
+    const enabledOrigin = normalizeOriginFromApi(data.origin);
+
+    updateCollection("origins", (currentOrigins) =>
+      currentOrigins.map((item) =>
+        (item._id || item.id) === originId ? enabledOrigin : item
+      )
+    );
+
+    return enabledOrigin;
+  };
+
   const createCharacterQuick = async ({ name, serie = "" }) => {
     const cleanName = name?.trim();
     const cleanSerie = serie?.trim() || "Sin serie definida";
@@ -1357,18 +1630,24 @@ export function AdminDataProvider({ children }) {
       eventsLoadError,
       charactersLoadError,
       categoriesLoadError,
+      creatorsLoadError,
+      originsLoadError,
 
       loadingProducts,
       loadingSeries,
       loadingEvents,
       loadingCharacters,
       loadingCategories,
+      loadingCreators,
+      loadingOrigins,
 
       products: adminData.products,
       events: adminData.events,
       series: adminData.series,
       characters: adminData.characters,
       categories: adminData.categories,
+      creators: adminData.creators,
+      origins: adminData.origins,
       users: adminData.users,
 
       refreshAdminData,
@@ -1377,6 +1656,8 @@ export function AdminDataProvider({ children }) {
       refreshEvents,
       refreshCharacters,
       refreshCategories,
+      refreshCreators,
+      refreshOrigins,
 
       createProduct,
       updateProduct,
@@ -1394,6 +1675,14 @@ export function AdminDataProvider({ children }) {
       updateCategory,
       toggleCategoryStatus,
 
+      createCreatorFull,
+      updateCreator,
+      toggleCreatorStatus,
+
+      createOriginFull,
+      updateOrigin,
+      toggleOriginStatus,
+
       createCharacterQuick,
       createCharacterFull,
       updateCharacter,
@@ -1404,6 +1693,8 @@ export function AdminDataProvider({ children }) {
       setSeries: (updater) => updateCollection("series", updater),
       setCharacters: (updater) => updateCollection("characters", updater),
       setCategories: (updater) => updateCollection("categories", updater),
+      setCreators: (updater) => updateCollection("creators", updater),
+      setOrigins: (updater) => updateCollection("origins", updater),
       setUsers: (updater) => updateCollection("users", updater)
     }),
     [
@@ -1414,12 +1705,16 @@ export function AdminDataProvider({ children }) {
       eventsLoadError,
       charactersLoadError,
       categoriesLoadError,
+      creatorsLoadError,
+      originsLoadError,
 
       loadingProducts,
       loadingSeries,
       loadingEvents,
       loadingCharacters,
       loadingCategories,
+      loadingCreators,
+      loadingOrigins,
 
       adminData
     ]
