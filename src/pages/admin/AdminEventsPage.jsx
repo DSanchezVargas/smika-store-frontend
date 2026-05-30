@@ -3,7 +3,6 @@ import {
   ArrowLeft,
   Boxes,
   CalendarDays,
-  Image,
   Loader2,
   Pencil,
   Plus,
@@ -13,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { useAdminData } from "../../context/AdminDataContext";
+import AutoCarousel from "../../components/common/AutoCarousel";
 
 const initialForm = {
   titulo: "",
@@ -77,6 +77,29 @@ function getEventStatus(event) {
   return getEstadoText(event.estado);
 }
 
+function getImagesFromForm(form) {
+  const imagesFromText = form.imagenesTexto
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const allImages = [form.imagen.trim(), ...imagesFromText].filter(Boolean);
+
+  return [...new Set(allImages)];
+}
+
+function getEventImages(eventItem) {
+  if (Array.isArray(eventItem.imagenes) && eventItem.imagenes.length > 0) {
+    return eventItem.imagenes;
+  }
+
+  if (eventItem.imagen) {
+    return [eventItem.imagen];
+  }
+
+  return [];
+}
+
 function AdminEventsPage() {
   const {
     events,
@@ -115,6 +138,10 @@ function AdminEventsPage() {
     return (products || []).filter((product) => product.activo !== false);
   }, [products]);
 
+  const previewImages = useMemo(() => {
+    return getImagesFromForm(form);
+  }, [form.imagen, form.imagenesTexto]);
+
   const resetForm = () => {
     setForm(initialForm);
     setEditingEvent(null);
@@ -132,6 +159,10 @@ function AdminEventsPage() {
     setMessage("");
     setEditingEvent(eventItem);
 
+    const eventImages = getEventImages(eventItem);
+    const mainImage = eventItem.imagen || eventImages[0] || "";
+    const extraImages = eventImages.filter((image) => image !== mainImage);
+
     const productIds = Array.isArray(eventItem.productos)
       ? eventItem.productos
           .map((product) => {
@@ -144,11 +175,10 @@ function AdminEventsPage() {
     setForm({
       titulo: eventItem.titulo || eventItem.nombre || "",
       descripcion: eventItem.descripcion || "",
-      imagen: eventItem.imagen || "",
-      imagenesTexto: Array.isArray(eventItem.imagenes)
-        ? eventItem.imagenes.join(", ")
-        : "",
-      categoriaNombre: eventItem.categoriaNombre || eventItem.categoria || "Eventos",
+      imagen: mainImage,
+      imagenesTexto: extraImages.join(", "),
+      categoriaNombre:
+        eventItem.categoriaNombre || eventItem.categoria || "Eventos",
       serie: eventItem.serieNombre || eventItem.serie || "",
       origenNombre: eventItem.origenNombre || eventItem.origen || "Variado",
       pais: eventItem.pais || "V",
@@ -176,7 +206,6 @@ function AdminEventsPage() {
   const handleToggleProduct = (productId) => {
     setForm((currentForm) => {
       const selectedProducts = currentForm.productos || [];
-
       const exists = selectedProducts.includes(productId);
 
       return {
@@ -189,21 +218,14 @@ function AdminEventsPage() {
   };
 
   const buildPayload = () => {
-    const imagenes = form.imagenesTexto
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean);
-
-    if (form.imagen.trim() && !imagenes.includes(form.imagen.trim())) {
-      imagenes.unshift(form.imagen.trim());
-    }
+    const imagenes = getImagesFromForm(form);
 
     return {
       titulo: form.titulo.trim(),
       nombre: form.titulo.trim(),
       descripcion: form.descripcion.trim(),
-      imagen: form.imagen.trim(),
 
+      imagen: form.imagen.trim() || imagenes[0] || "",
       imagenes,
 
       categoriaNombre: form.categoriaNombre.trim() || "Eventos",
@@ -295,8 +317,8 @@ function AdminEventsPage() {
             <h2 className="text-4xl font-black">Gestión de eventos</h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Crea eventos como Lebom, Café o Fantazit, agrega descripción,
-              imágenes y productos vinculados.
+              Crea eventos como Lebom, Café o Fantazit. Puedes agregar varias
+              imágenes para mostrarlas como carrusel automático.
             </p>
           </div>
 
@@ -504,7 +526,7 @@ function AdminEventsPage() {
                 value={form.imagen}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="URL o ruta generada por el sistema"
+                placeholder="URL o ruta de la imagen principal"
               />
             </label>
 
@@ -517,6 +539,9 @@ function AdminEventsPage() {
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
                 placeholder="Pega varias URLs separadas por coma"
               />
+              <span className="text-xs font-semibold text-gray-500">
+                Ejemplo: imagen1.jpg, imagen2.jpg, imagen3.jpg
+              </span>
             </label>
 
             <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4">
@@ -556,6 +581,22 @@ function AdminEventsPage() {
             </label>
 
             <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
+              <p className="font-black">Vista previa del carrusel</p>
+              <p className="mt-1 text-sm text-gray-600">
+                Las imágenes se moverán automáticamente cada 6 segundos y
+                también podrán moverse con flechas.
+              </p>
+
+              <div className="mt-4">
+                <AutoCarousel
+                  images={previewImages}
+                  alt={form.titulo || "Evento Smika"}
+                  heightClassName="h-72"
+                />
+              </div>
+            </div>
+
+            <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
               <div className="flex items-center justify-between gap-4">
                 <div>
                   <p className="font-black">Productos vinculados</p>
@@ -593,9 +634,7 @@ function AdminEventsPage() {
                           className="h-4 w-4"
                         />
 
-                        <span className="line-clamp-1">
-                          {product.nombre}
-                        </span>
+                        <span className="line-clamp-1">{product.nombre}</span>
                       </label>
                     );
                   })}
@@ -628,103 +667,98 @@ function AdminEventsPage() {
             </div>
           ) : (
             <div className="grid gap-6 lg:grid-cols-3">
-              {sortedEvents.map((eventItem) => (
-                <article
-                  key={getId(eventItem)}
-                  className="rounded-[28px] bg-white border border-[#87CCC8]/20 smika-shadow overflow-hidden"
-                >
-                  <div className="h-44 bg-[#87CCC8] flex items-center justify-center text-white text-3xl font-black text-center px-5">
-                    {eventItem.imagen ? (
-                      <img
-                        src={eventItem.imagen}
-                        alt={eventItem.titulo || eventItem.nombre}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      eventItem.titulo || eventItem.nombre
-                    )}
-                  </div>
+              {sortedEvents.map((eventItem) => {
+                const eventImages = getEventImages(eventItem);
 
-                  <div className="p-6">
-                    <div className="flex flex-wrap gap-2">
-                      <span className="rounded-full bg-[#F7D9D8] px-3 py-1 text-xs font-black">
-                        {getEventStatus(eventItem)}
-                      </span>
+                return (
+                  <article
+                    key={getId(eventItem)}
+                    className="rounded-[28px] bg-white border border-[#87CCC8]/20 smika-shadow overflow-hidden"
+                  >
+                    <AutoCarousel
+                      images={eventImages}
+                      alt={eventItem.titulo || eventItem.nombre}
+                      heightClassName="h-44"
+                      className="rounded-none"
+                    />
 
-                      {eventItem.pais && (
-                        <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
-                          {eventItem.pais}
+                    <div className="p-6">
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-[#F7D9D8] px-3 py-1 text-xs font-black">
+                          {getEventStatus(eventItem)}
                         </span>
-                      )}
+
+                        {eventItem.pais && (
+                          <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
+                            {eventItem.pais}
+                          </span>
+                        )}
+                      </div>
+
+                      <h3 className="mt-4 text-2xl font-black">
+                        {eventItem.titulo || eventItem.nombre}
+                      </h3>
+
+                      <div className="mt-3 grid gap-2 text-sm text-gray-600">
+                        <p>
+                          <strong>Tipo:</strong>{" "}
+                          {eventItem.tipoEvento || eventItem.tipo || "Otro"}
+                        </p>
+
+                        <p>
+                          <strong>Serie:</strong>{" "}
+                          {eventItem.serieNombre || "Sin serie"}
+                        </p>
+
+                        <p>
+                          <strong>País:</strong>{" "}
+                          {eventItem.origenNombre || eventItem.pais || "Variado"}
+                        </p>
+
+                        <p>
+                          <strong>Inicio:</strong>{" "}
+                          {formatDateForView(eventItem.fechaInicio)}
+                        </p>
+
+                        <p>
+                          <strong>Productos:</strong>{" "}
+                          {eventItem.productos?.length || 0}
+                        </p>
+
+                        <p>
+                          <strong>Imágenes:</strong> {eventImages.length}
+                        </p>
+                      </div>
+
+                      <div className="mt-5 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditForm(eventItem)}
+                          className="smika-button-primary flex-1 flex items-center justify-center gap-2"
+                        >
+                          <Pencil size={16} />
+                          Editar
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleStatus(eventItem)}
+                          disabled={saving}
+                          className="h-11 w-11 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-60"
+                          title={eventItem.activo ? "Desactivar" : "Activar"}
+                        >
+                          <Power
+                            size={17}
+                            className={
+                              eventItem.activo ? "text-gray-500" : "text-red-500"
+                            }
+                          />
+                        </button>
+                      </div>
                     </div>
-
-                    <h3 className="mt-4 text-2xl font-black">
-                      {eventItem.titulo || eventItem.nombre}
-                    </h3>
-
-                    <div className="mt-3 grid gap-2 text-sm text-gray-600">
-                      <p>
-                        <strong>Tipo:</strong>{" "}
-                        {eventItem.tipoEvento || eventItem.tipo || "Otro"}
-                      </p>
-
-                      <p>
-                        <strong>Serie:</strong>{" "}
-                        {eventItem.serieNombre || "Sin serie"}
-                      </p>
-
-                      <p>
-                        <strong>País:</strong>{" "}
-                        {eventItem.origenNombre || eventItem.pais || "Variado"}
-                      </p>
-
-                      <p>
-                        <strong>Inicio:</strong>{" "}
-                        {formatDateForView(eventItem.fechaInicio)}
-                      </p>
-
-                      <p>
-                        <strong>Productos:</strong>{" "}
-                        {eventItem.productos?.length || 0}
-                      </p>
-                    </div>
-
-                    <div className="mt-5 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openEditForm(eventItem)}
-                        className="smika-button-primary flex-1 flex items-center justify-center gap-2"
-                      >
-                        <Pencil size={16} />
-                        Editar
-                      </button>
-
-                      <button
-                        type="button"
-                        className="h-11 w-11 rounded-full bg-[#F8F6F7] flex items-center justify-center"
-                        title="Imagen"
-                      >
-                        <Image size={17} />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStatus(eventItem)}
-                        disabled={saving}
-                        className="h-11 w-11 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-60"
-                        title={eventItem.activo ? "Desactivar" : "Activar"}
-                      >
-                        <Power
-                          size={17}
-                          className={
-                            eventItem.activo ? "text-gray-500" : "text-red-500"
-                          }
-                        />
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           )}
         </>

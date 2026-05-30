@@ -1,252 +1,273 @@
-import { useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
-  ChevronLeft,
-  ChevronRight,
   Heart,
-  SlidersHorizontal
+  Loader2,
+  RefreshCw
 } from "lucide-react";
 
-import ProductCard from "../../components/product/ProductCard";
-import { mockEvents } from "../../data/mockEvents";
-import { mockProducts } from "../../data/mockProducts";
-import { priceRangeConfig } from "../../data/catalogFilters";
+import AutoCarousel from "../../components/common/AutoCarousel";
+import { useAdminData } from "../../context/AdminDataContext";
 import { useAuth } from "../../context/AuthContext";
 
-function EventDetailPage() {
-  const { slug } = useParams();
-  const { isAuthenticated, isStaff } = useAuth();
-  const [currentImage, setCurrentImage] = useState(0);
-  const [maxPrice, setMaxPrice] = useState(priceRangeConfig.max);
-  const [selectedType, setSelectedType] = useState("");
+function createSlug(text = "") {
+  return text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+}
 
-  const event = mockEvents.find((item) => item.slug === slug);
+function getId(item) {
+  return item?._id || item?.id || "";
+}
 
-  const eventProducts = useMemo(() => {
-    return mockProducts.filter((product) => product.eventSlug === slug);
-  }, [slug]);
+function getEventTitle(event) {
+  return event?.titulo || event?.nombre || event?.title || "Evento Smika";
+}
 
-  const productTypes = useMemo(() => {
-    return [...new Set(eventProducts.map((product) => product.typeProduct))];
-  }, [eventProducts]);
+function getEventSlug(event) {
+  return event?.slug || createSlug(getEventTitle(event) || getId(event));
+}
 
-  const visibleProducts = eventProducts.filter((product) => {
-    const matchesPrice = product.price <= maxPrice;
-    const matchesType = selectedType ? product.typeProduct === selectedType : true;
+function getEventImages(event) {
+  const images = Array.isArray(event?.imagenes)
+    ? event.imagenes.filter(Boolean)
+    : [];
 
-    return matchesPrice && matchesType;
-  });
-
-  if (!event) {
-    return (
-      <section className="container-smika py-12">
-        <div className="rounded-[32px] bg-[#F8F6F7] p-8">
-          <h2 className="text-3xl font-black">Evento no encontrado</h2>
-
-          <Link
-            to="/programacion-eventos"
-            className="smika-button-primary inline-block mt-5"
-          >
-            Volver a programación
-          </Link>
-        </div>
-      </section>
-    );
+  if (event?.imagen && !images.includes(event.imagen)) {
+    images.unshift(event.imagen);
   }
 
-  const goPrevious = () => {
-    setCurrentImage((current) => {
-      if (current === 0) return event.images.length - 1;
-      return current - 1;
+  if (Array.isArray(event?.images)) {
+    event.images.forEach((image) => {
+      if (image && !images.includes(image)) images.push(image);
     });
+  }
+
+  return images;
+}
+
+function formatDate(value) {
+  if (!value) return "Fecha por confirmar";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleDateString("es-PE", {
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  });
+}
+
+function getEventStatus(event) {
+  const status = event?.estado || event?.status || "proximo";
+
+  const labels = {
+    proximo: "Evento próximo",
+    activo: "Evento actual",
+    actual: "Evento actual",
+    finalizado: "Evento finalizado",
+    cancelado: "Evento cancelado"
   };
 
-  const goNext = () => {
-    setCurrentImage((current) => {
-      if (current === event.images.length - 1) return 0;
-      return current + 1;
-    });
-  };
+  return labels[status] || "Evento próximo";
+}
+
+function isUpcomingEvent(event) {
+  const status = event?.estado || event?.status || "proximo";
+
+  return status === "proximo";
+}
+
+function EventSchedulePage() {
+  const {
+    events,
+    loadingEvents,
+    eventsLoadError,
+    refreshEvents
+  } = useAdminData();
+
+  const { isAuthenticated, isStaff } = useAuth();
+
+  const activeEvents = useMemo(() => {
+    return [...(events || [])]
+      .filter((event) => event.activo !== false)
+      .sort((a, b) => {
+        const dateA = a.fechaInicio ? new Date(a.fechaInicio).getTime() : 0;
+        const dateB = b.fechaInicio ? new Date(b.fechaInicio).getTime() : 0;
+
+        if (dateA !== dateB) return dateA - dateB;
+
+        return getEventTitle(a).localeCompare(getEventTitle(b));
+      });
+  }, [events]);
 
   return (
     <section className="container-smika py-12">
       <div className="rounded-[32px] bg-[#F8F6F7] p-8 mb-8">
-        <p className="text-[#87CCC8] font-black">Evento Smika Store</p>
+        <p className="text-[#87CCC8] font-black">Programación Smika Store</p>
 
-        <h2 className="text-4xl font-black mt-2">
-          {event.title}
-        </h2>
-
-        <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-          {event.description}
-        </p>
-
-        <div className="mt-5 flex flex-wrap gap-3 text-sm font-bold">
-          <span className="rounded-full bg-white px-4 py-2">
-            {event.status === "actual" ? "Evento actual" : "Evento próximo"}
-          </span>
-
-          <span className="rounded-full bg-white px-4 py-2">
-            Serie fija: {event.series}
-          </span>
-
-          <span className="rounded-full bg-white px-4 py-2">
-            País/origen: {event.countryCode}
-          </span>
-        </div>
-      </div>
-
-      <div className="smika-card smika-shadow overflow-hidden mb-10">
-        <div className="relative">
-          <img
-            src={event.images[currentImage]}
-            alt={event.title}
-            className="w-full h-[440px] object-cover"
-          />
-
-          <button
-            onClick={goPrevious}
-            className="absolute left-5 top-1/2 -translate-y-1/2 h-12 w-12 rounded-full bg-white/95 flex items-center justify-center smika-shadow"
-          >
-            <ChevronLeft size={26} />
-          </button>
-
-          <button
-            onClick={goNext}
-            className="absolute right-5 top-1/2 -translate-y-1/2 h-12 w-12 rounded-full bg-white/95 flex items-center justify-center smika-shadow"
-          >
-            <ChevronRight size={26} />
-          </button>
-        </div>
-
-        <div className="p-6 flex flex-wrap items-center justify-between gap-4">
+        <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 text-[#D1B0C7] font-black">
-              <CalendarDays size={18} />
-              {event.date}
-            </div>
+            <h2 className="text-4xl font-black">Eventos actuales y próximos</h2>
 
-            <h3 className="mt-2 text-2xl font-black">
-              Productos vinculados al evento
-            </h3>
-          </div>
-
-          {event.status === "proximo" && (
-            <>
-              {isAuthenticated ? (
-                <button className="smika-button-primary flex items-center gap-2">
-                  <Heart size={18} />
-                  Guardar evento
-                </button>
-              ) : (
-                <Link
-                  to={`/login?redirect=/programacion-eventos/${event.slug}`}
-                  className="smika-button-primary flex items-center gap-2"
-                >
-                  <Bell size={18} />
-                  Iniciar sesión para guardar
-                </Link>
-              )}
-            </>
-          )}
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-        <aside className="smika-card p-5 h-fit">
-          <div className="flex items-center gap-2">
-            <SlidersHorizontal size={20} className="text-[#87CCC8]" />
-            <h3 className="font-black text-lg">Filtros del evento</h3>
-          </div>
-
-          <div className="mt-6 grid gap-5">
-            <div className="rounded-3xl bg-[#F7D9D8]/50 p-4">
-              <p className="text-sm font-black">Serie fija del evento</p>
-
-              <p className="mt-1 text-sm text-gray-600">
-                {event.series}
-              </p>
-
-              <p className="mt-2 text-xs text-gray-500 leading-5">
-                No se muestra filtro de serie porque este evento ya pertenece a
-                una historia/serie definida.
-              </p>
-            </div>
-
-            <div className="grid gap-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm font-bold">Precio</span>
-
-                <span className="text-sm font-black text-[#87CCC8]">
-                  S/ {priceRangeConfig.min} - S/ {maxPrice}
-                </span>
-              </div>
-
-              <div className="rounded-3xl border border-[#87CCC8]/25 bg-white p-4">
-                <input
-                  type="range"
-                  min={priceRangeConfig.min}
-                  max={priceRangeConfig.max}
-                  value={maxPrice}
-                  onChange={(event) => setMaxPrice(Number(event.target.value))}
-                  className="w-full accent-[#87CCC8]"
-                />
-
-                <div className="mt-2 flex justify-between text-xs font-bold text-gray-500">
-                  <span>S/ {priceRangeConfig.min}</span>
-                  <span>S/ {priceRangeConfig.max}</span>
-                </div>
-              </div>
-            </div>
-
-            <label className="grid gap-2 text-sm font-bold">
-              Tipo de producto
-
-              <select
-                value={selectedType}
-                onChange={(event) => setSelectedType(event.target.value)}
-                className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
-              >
-                <option value="">Todos</option>
-
-                {productTypes.map((type) => (
-                  <option key={type} value={type}>
-                    {type}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </div>
-        </aside>
-
-        <div>
-          <div className="mb-6 rounded-3xl bg-[#F8F6F7] p-5">
-            <h3 className="font-black">Productos del evento</h3>
-
-            <p className="mt-2 text-sm text-gray-600 leading-6">
-              La administradora podrá enlazar productos ya registrados a este
-              evento. Si el producto no existe, podrá crearlo desde el panel y
-              asociarlo directamente al evento.
+            <p className="mt-3 text-gray-600 max-w-3xl leading-7">
+              Revisa los eventos disponibles, sus imágenes y los productos
+              vinculados. Las imágenes se desplazan automáticamente cada 6
+              segundos y también puedes moverlas con flechas.
             </p>
           </div>
 
-          {visibleProducts.length > 0 ? (
-            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              {visibleProducts.map((product) => (
-                <ProductCard key={product.id} product={product} />
-              ))}
-            </div>
-          ) : (
-            <div className="smika-card p-8 text-center text-gray-500">
-              No hay productos que coincidan con los filtros seleccionados.
-            </div>
-          )}
+          <button
+            type="button"
+            onClick={refreshEvents}
+            disabled={loadingEvents}
+            className="rounded-full bg-white px-5 py-3 font-black flex items-center gap-2 disabled:opacity-60"
+          >
+            <RefreshCw
+              size={18}
+              className={loadingEvents ? "animate-spin" : ""}
+            />
+            Recargar
+          </button>
         </div>
       </div>
+
+      {eventsLoadError && (
+        <div className="mb-6 rounded-[24px] bg-red-50 px-5 py-4 text-sm font-black text-red-600">
+          {eventsLoadError}
+        </div>
+      )}
+
+      {loadingEvents ? (
+        <div className="rounded-[32px] bg-white p-10 text-center smika-shadow">
+          <Loader2 size={46} className="mx-auto animate-spin text-[#87CCC8]" />
+          <p className="mt-4 font-black">Cargando eventos...</p>
+        </div>
+      ) : activeEvents.length === 0 ? (
+        <div className="rounded-[32px] bg-white p-10 text-center smika-shadow">
+          <CalendarDays size={46} className="mx-auto text-[#D1B0C7]" />
+          <h3 className="mt-4 text-2xl font-black">
+            Todavía no hay eventos publicados
+          </h3>
+          <p className="mt-2 text-gray-600">
+            Cuando la administradora registre eventos, aparecerán aquí.
+          </p>
+        </div>
+      ) : (
+        <div className="grid gap-8 lg:grid-cols-2">
+          {activeEvents.map((event) => {
+            const title = getEventTitle(event);
+            const slug = getEventSlug(event);
+            const images = getEventImages(event);
+
+            return (
+              <article
+                key={getId(event) || slug}
+                className="smika-card smika-shadow overflow-hidden"
+              >
+                <AutoCarousel
+                  images={images}
+                  alt={title}
+                  heightClassName="h-72"
+                  className="rounded-none"
+                />
+
+                <div className="p-6">
+                  <div className="flex flex-wrap gap-2 text-xs font-black">
+                    <span className="rounded-full bg-[#F7D9D8] px-3 py-1">
+                      {getEventStatus(event)}
+                    </span>
+
+                    <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1">
+                      {event.pais || event.countryCode || "V"}
+                    </span>
+
+                    {event.destacado && (
+                      <span className="rounded-full bg-white px-3 py-1">
+                        Destacado
+                      </span>
+                    )}
+                  </div>
+
+                  <h3 className="mt-4 text-2xl font-black">{title}</h3>
+
+                  <p className="mt-3 text-sm text-gray-600 leading-6 line-clamp-3">
+                    {event.descripcion ||
+                      event.description ||
+                      "Evento registrado por Smika Store."}
+                  </p>
+
+                  <div className="mt-4 grid gap-2 text-sm text-gray-600">
+                    <p>
+                      <strong>Serie:</strong>{" "}
+                      {event.serieNombre || event.series || "Sin serie fija"}
+                    </p>
+
+                    <p>
+                      <strong>País/origen:</strong>{" "}
+                      {event.origenNombre ||
+                        event.country ||
+                        event.countryCode ||
+                        "Variado"}
+                    </p>
+
+                    <p>
+                      <strong>Inicio:</strong>{" "}
+                      {formatDate(event.fechaInicio || event.date)}
+                    </p>
+
+                    <p>
+                      <strong>Imágenes:</strong> {images.length}
+                    </p>
+                  </div>
+
+                  <div className="mt-6 flex flex-wrap gap-3">
+                    <Link
+                      to={`/programacion-eventos/${slug}`}
+                      className="smika-button-primary"
+                    >
+                      Ver evento
+                    </Link>
+
+                    {isUpcomingEvent(event) && !isStaff && (
+                      <>
+                        {isAuthenticated ? (
+                          <button
+                            type="button"
+                            className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center gap-2"
+                          >
+                            <Heart size={18} />
+                            Guardar evento
+                          </button>
+                        ) : (
+                          <Link
+                            to={`/login?redirect=/programacion-eventos/${slug}`}
+                            className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center gap-2"
+                          >
+                            <Bell size={18} />
+                            Iniciar sesión para guardar
+                          </Link>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
     </section>
   );
 }
 
-export default EventDetailPage; 
+export default EventSchedulePage;

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router-dom";
-import { SlidersHorizontal } from "lucide-react";
+import { BookOpen, SlidersHorizontal } from "lucide-react";
 
+import AutoCarousel from "../../components/common/AutoCarousel";
 import ProductCard from "../../components/product/ProductCard";
 import { useAdminData } from "../../context/AdminDataContext";
 import { getPublicProducts } from "../../utils/publicProducts";
@@ -43,6 +44,18 @@ function matchesRoute(value = "", route = "") {
   return valueSlug.includes(routeSlug) || routeSlug.includes(valueSlug);
 }
 
+function getSeriesImages(serie) {
+  const images = Array.isArray(serie?.imagenes)
+    ? serie.imagenes.filter(Boolean)
+    : [];
+
+  if (serie?.imagen && !images.includes(serie.imagen)) {
+    images.unshift(serie.imagen);
+  }
+
+  return images;
+}
+
 function getProductCountryCode(product, seriesByName) {
   const directCountry =
     product.countryCode ||
@@ -63,14 +76,14 @@ function isProductFromCurrentSection(product, title, subcategory) {
   const section = normalizeText(title);
   const tipo = normalizeText(product.tipo || product.type || "");
   const estado = normalizeText(product.estado || product.status || "");
-  const evento = product.evento || product.event || "";
+  const evento = product.evento || product.event || product.eventoNombre || "";
 
   if (section.includes("nuevo")) {
     return true;
   }
 
   if (section.includes("serie")) {
-    return Boolean(product.serie || product.series);
+    return Boolean(product.serie || product.series || product.serieNombre);
   }
 
   if (section.includes("evento")) {
@@ -95,6 +108,20 @@ function isProductFromCurrentSection(product, title, subcategory) {
   return true;
 }
 
+function getSeriesCountryCode(serie) {
+  return serie.pais || serie.countryCode || "V";
+}
+
+function getSeriesAuthor(serie) {
+  return (
+    serie.autor ||
+    serie.author ||
+    serie.creador ||
+    serie.creadoresNombre?.join(", ") ||
+    ""
+  );
+}
+
 function CatalogPage({ title = "Catálogo" }) {
   const { subcategory } = useParams();
   const { products, series } = useAdminData();
@@ -112,7 +139,7 @@ function CatalogPage({ title = "Catálogo" }) {
   const seriesByName = useMemo(() => {
     const map = new Map();
 
-    series.forEach((serie) => {
+    (series || []).forEach((serie) => {
       map.set(normalizeText(serie.nombre), serie);
     });
 
@@ -148,12 +175,12 @@ function CatalogPage({ title = "Catálogo" }) {
   const currentCountry = countryFromRoute || selectedCountry;
 
   const availableStories = useMemo(() => {
-    const storiesFromAdmin = series
+    const storiesFromAdmin = (series || [])
       .filter((serie) => {
         if (!serie.activo) return false;
         if (!currentCountry) return true;
 
-        return serie.pais === currentCountry;
+        return getSeriesCountryCode(serie) === currentCountry;
       })
       .map((serie) => serie.nombre);
 
@@ -163,6 +190,59 @@ function CatalogPage({ title = "Catálogo" }) {
 
     return [...new Set([...storiesFromAdmin, ...storiesFromStaticFilters])];
   }, [series, currentCountry]);
+
+  const visibleSeries = useMemo(() => {
+    if (!isSeriesPage) return [];
+
+    return (series || [])
+      .filter((serie) => serie.activo !== false)
+      .filter((serie) => {
+        if (currentCountry && getSeriesCountryCode(serie) !== currentCountry) {
+          return false;
+        }
+
+        if (
+          selectedStory &&
+          normalizeText(serie.nombre) !== normalizeText(selectedStory)
+        ) {
+          return false;
+        }
+
+        if (
+          selectedGenre &&
+          normalizeText(serie.genero || serie.genre || "") !==
+            normalizeText(selectedGenre)
+        ) {
+          return false;
+        }
+
+        if (
+          selectedAuthor &&
+          !normalizeText(getSeriesAuthor(serie)).includes(
+            normalizeText(selectedAuthor)
+          )
+        ) {
+          return false;
+        }
+
+        return true;
+      })
+      .sort((a, b) => {
+        const orderA = Number(a.orden || 0);
+        const orderB = Number(b.orden || 0);
+
+        if (orderA !== orderB) return orderA - orderB;
+
+        return (a.nombre || "").localeCompare(b.nombre || "");
+      });
+  }, [
+    isSeriesPage,
+    series,
+    currentCountry,
+    selectedStory,
+    selectedGenre,
+    selectedAuthor
+  ]);
 
   const sectionProducts = useMemo(() => {
     return publicProducts.filter((product) =>
@@ -201,7 +281,8 @@ function CatalogPage({ title = "Catálogo" }) {
 
       if (availability === "Agotado") {
         const isSoldOut =
-          product.stock <= 0 || normalizeText(product.estado).includes("agotado");
+          product.stock <= 0 ||
+          normalizeText(product.estado).includes("agotado");
 
         if (!isSoldOut) return false;
       }
@@ -223,7 +304,7 @@ function CatalogPage({ title = "Catálogo" }) {
 
         if (
           selectedStory &&
-          normalizeText(product.serie || product.series) !==
+          normalizeText(product.serie || product.series || product.serieNombre) !==
             normalizeText(selectedStory)
         ) {
           return false;
@@ -238,7 +319,8 @@ function CatalogPage({ title = "Catálogo" }) {
         }
 
         if (selectedAuthor) {
-          const author = product.autor || product.author || product.creador || "";
+          const author =
+            product.autor || product.author || product.creador || "";
 
           if (normalizeText(author) !== normalizeText(selectedAuthor)) {
             return false;
@@ -274,6 +356,13 @@ function CatalogPage({ title = "Catálogo" }) {
             <span className="font-bold capitalize">
               {subcategory.replace("-", " ")}
             </span>
+          </p>
+        )}
+
+        {isSeriesPage && (
+          <p className="mt-3 text-gray-600 max-w-3xl leading-7">
+            Explora historias y series por origen. Cada serie puede mostrar
+            varias imágenes en carrusel automático.
           </p>
         )}
       </div>
@@ -324,11 +413,6 @@ function CatalogPage({ title = "Catálogo" }) {
                   <span>S/ {priceRange.max}</span>
                 </div>
               </div>
-
-              <p className="text-xs text-gray-500 leading-5">
-                Este rango se sincroniza automáticamente con los productos
-                activos creados por admin.
-              </p>
             </div>
 
             <label className="grid gap-2 text-sm font-bold">
@@ -336,8 +420,8 @@ function CatalogPage({ title = "Catálogo" }) {
               <input
                 value={typeSearch}
                 onChange={(event) => setTypeSearch(event.target.value)}
-                className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none focus:border-[#87CCC8]"
-                placeholder="Ej. stand, tomo, pin..."
+                className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                placeholder="Stand, llavero, photocard..."
               />
             </label>
 
@@ -352,20 +436,20 @@ function CatalogPage({ title = "Catálogo" }) {
                       setSelectedStory("");
                     }}
                     disabled={Boolean(countryFromRoute)}
-                    className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8] disabled:bg-[#F8F6F7]"
+                    className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8] disabled:bg-gray-100"
                   >
                     <option value="">Todos</option>
 
                     {countryFilters.map((country) => (
                       <option key={country.code} value={country.code}>
-                        {country.label} ({country.code})
+                        {country.label}
                       </option>
                     ))}
                   </select>
                 </label>
 
                 <label className="grid gap-2 text-sm font-bold">
-                  Serie / historia
+                  Historia / serie
                   <select
                     value={selectedStory}
                     onChange={(event) => setSelectedStory(event.target.value)}
@@ -399,7 +483,7 @@ function CatalogPage({ title = "Catálogo" }) {
                 </label>
 
                 <label className="grid gap-2 text-sm font-bold">
-                  Autor / creador
+                  Autor/a
                   <select
                     value={selectedAuthor}
                     onChange={(event) => setSelectedAuthor(event.target.value)}
@@ -419,37 +503,106 @@ function CatalogPage({ title = "Catálogo" }) {
           </div>
         </aside>
 
-        <div>
+        <div className="space-y-8">
           {isSeriesPage && (
-            <div className="mb-6 rounded-3xl bg-[#F7D9D8]/50 p-5">
-              <h3 className="font-black">Series / historias</h3>
+            <div>
+              <div className="mb-5 flex items-center gap-2">
+                <BookOpen size={22} className="text-[#87CCC8]" />
+                <h3 className="text-2xl font-black">
+                  Historias disponibles
+                </h3>
+              </div>
 
-              <p className="mt-2 text-sm text-gray-600 leading-6">
-                En esta sección, las historias podrán filtrarse por país,
-                género y autor. Los personajes se manejarán como relación
-                interna desde el panel administrador, no como filtro visible
-                por ahora.
-              </p>
+              {visibleSeries.length > 0 ? (
+                <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+                  {visibleSeries.map((serie) => {
+                    const images = getSeriesImages(serie);
+
+                    return (
+                      <article
+                        key={serie._id || serie.id || serie.nombre}
+                        className="smika-card smika-shadow overflow-hidden"
+                      >
+                        <AutoCarousel
+                          images={images}
+                          alt={serie.nombre}
+                          heightClassName="h-56"
+                          className="rounded-none"
+                        />
+
+                        <div className="p-5">
+                          <div className="flex flex-wrap gap-2 text-xs font-black">
+                            <span className="rounded-full bg-[#F7D9D8] px-3 py-1">
+                              {serie.pais || "V"}
+                            </span>
+
+                            <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1">
+                              {serie.genero || "Historia"}
+                            </span>
+                          </div>
+
+                          <h4 className="mt-4 text-xl font-black">
+                            {serie.nombre}
+                          </h4>
+
+                          <p className="mt-2 text-sm text-gray-600 line-clamp-3">
+                            {serie.descripcion ||
+                              "Serie registrada por Smika Store."}
+                          </p>
+
+                          <div className="mt-4 grid gap-1 text-sm text-gray-600">
+                            <p>
+                              <strong>Origen:</strong>{" "}
+                              {serie.origenNombre || "Variado"}
+                            </p>
+
+                            <p>
+                              <strong>Autor/a:</strong>{" "}
+                              {getSeriesAuthor(serie) || "No especificado"}
+                            </p>
+
+                            <p>
+                              <strong>Imágenes:</strong> {images.length}
+                            </p>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-3xl bg-[#F8F6F7] p-8 text-center">
+                  <p className="font-black">
+                    No hay series disponibles con estos filtros.
+                  </p>
+                </div>
+              )}
             </div>
           )}
 
-          {visibleProducts.length > 0 ? (
-            <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-              {visibleProducts.map((product) => (
-                <ProductCard key={product.id} product={product} />
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-3xl bg-[#F8F6F7] p-10 text-center">
-              <p className="font-black text-[#2F2F2F]">
-                No hay productos disponibles con estos filtros.
-              </p>
+          <div>
+            <h3 className="mb-5 text-2xl font-black">
+              {isSeriesPage ? "Productos de las series" : "Productos"}
+            </h3>
 
-              <p className="mt-2 text-sm text-gray-500">
-                Revisa los filtros o crea productos activos desde el panel admin.
-              </p>
-            </div>
-          )}
+            {visibleProducts.length > 0 ? (
+              <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+                {visibleProducts.map((product) => (
+                  <ProductCard key={product.id || product._id} product={product} />
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-3xl bg-[#F8F6F7] p-10 text-center">
+                <p className="font-black text-[#2F2F2F]">
+                  No hay productos disponibles con estos filtros.
+                </p>
+
+                <p className="mt-2 text-sm text-gray-500">
+                  Revisa los filtros o crea productos activos desde el panel admin.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </section>

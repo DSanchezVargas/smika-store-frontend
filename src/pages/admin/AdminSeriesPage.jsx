@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
-  Image,
   Loader2,
   Pencil,
   Plus,
@@ -12,11 +11,13 @@ import {
 } from "lucide-react";
 
 import { useAdminData } from "../../context/AdminDataContext";
+import AutoCarousel from "../../components/common/AutoCarousel";
 
 const initialForm = {
   nombre: "",
   descripcion: "",
   imagen: "",
+  imagenesTexto: "",
   categoriaNombre: "Series",
   origenNombre: "Variado",
   pais: "V",
@@ -36,6 +37,17 @@ function getSeriesStatus(serie) {
   if (serie.activo === false || serie.activa === false) return "Inactiva";
   if (serie.destacada) return "Destacada";
   return "Activa";
+}
+
+function getImagesFromForm(form) {
+  const imagesFromText = form.imagenesTexto
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  const allImages = [form.imagen.trim(), ...imagesFromText].filter(Boolean);
+
+  return [...new Set(allImages)];
 }
 
 function AdminSeriesPage() {
@@ -62,6 +74,10 @@ function AdminSeriesPage() {
     });
   }, [series]);
 
+  const previewImages = useMemo(() => {
+    return getImagesFromForm(form);
+  }, [form.imagen, form.imagenesTexto]);
+
   const resetForm = () => {
     setForm(initialForm);
     setEditingSeries(null);
@@ -79,10 +95,19 @@ function AdminSeriesPage() {
     setMessage("");
     setEditingSeries(serie);
 
+    const imagenes = Array.isArray(serie.imagenes)
+      ? serie.imagenes.filter(Boolean)
+      : [];
+
+    const mainImage = serie.imagen || imagenes[0] || "";
+
+    const extraImages = imagenes.filter((image) => image !== mainImage);
+
     setForm({
       nombre: serie.nombre || "",
       descripcion: serie.descripcion || "",
-      imagen: serie.imagen || "",
+      imagen: mainImage,
+      imagenesTexto: extraImages.join(", "),
       categoriaNombre:
         serie.categoriaPrincipalNombre ||
         serie.categoriaNombre ||
@@ -92,10 +117,7 @@ function AdminSeriesPage() {
       pais: serie.pais || "V",
       tipo: serie.tipo || "Historia",
       genero: serie.genero || "",
-      autor:
-        serie.autor ||
-        serie.creadoresNombre?.join(", ") ||
-        "",
+      autor: serie.autor || serie.creadoresNombre?.join(", ") || "",
       destacada: Boolean(serie.destacada),
       activa: serie.activo !== false && serie.activa !== false,
       orden: Number(serie.orden || 0)
@@ -119,10 +141,14 @@ function AdminSeriesPage() {
       .map((item) => item.trim())
       .filter(Boolean);
 
+    const imagenes = getImagesFromForm(form);
+
     return {
       nombre: form.nombre.trim(),
       descripcion: form.descripcion.trim(),
-      imagen: form.imagen.trim(),
+
+      imagen: form.imagen.trim() || imagenes[0] || "",
+      imagenes,
 
       categoriaPrincipalNombre: form.categoriaNombre.trim() || "Series",
       categoriaNombre: form.categoriaNombre.trim() || "Series",
@@ -214,8 +240,8 @@ function AdminSeriesPage() {
             </h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Crea, edita, activa o desactiva historias y series. Estas series
-              aparecerán luego en el formulario de productos.
+              Crea, edita, activa o desactiva historias y series. Ahora puedes
+              agregar varias imágenes para que se muestren en carrusel.
             </p>
           </div>
 
@@ -385,14 +411,28 @@ function AdminSeriesPage() {
             </label>
 
             <label className="grid gap-2 text-sm font-black">
-              Imagen / portada
+              Imagen principal
               <input
                 name="imagen"
                 value={form.imagen}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="URL o ruta generada por el sistema"
+                placeholder="URL o ruta de la imagen principal"
               />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black lg:col-span-2">
+              Imágenes adicionales
+              <input
+                name="imagenesTexto"
+                value={form.imagenesTexto}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Pega varias URLs separadas por coma"
+              />
+              <span className="text-xs font-semibold text-gray-500">
+                Ejemplo: imagen1.jpg, imagen2.jpg, imagen3.jpg
+              </span>
             </label>
 
             <label className="grid gap-2 text-sm font-black">
@@ -442,6 +482,22 @@ function AdminSeriesPage() {
                 placeholder="Describe brevemente la serie o historia..."
               />
             </label>
+
+            <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
+              <p className="font-black">Vista previa del carrusel</p>
+              <p className="mt-1 text-sm text-gray-600">
+                Las imágenes se moverán automáticamente cada 6 segundos y
+                también podrán moverse con flechas.
+              </p>
+
+              <div className="mt-4">
+                <AutoCarousel
+                  images={previewImages}
+                  alt={form.nombre || "Serie Smika"}
+                  heightClassName="h-72"
+                />
+              </div>
+            </div>
           </div>
         </form>
       )}
@@ -468,100 +524,104 @@ function AdminSeriesPage() {
             </div>
           ) : (
             <div className="grid gap-6 xl:grid-cols-3">
-              {sortedSeries.map((serie) => (
-                <article
-                  key={getId(serie)}
-                  className="rounded-[28px] bg-white border border-[#87CCC8]/20 smika-shadow overflow-hidden"
-                >
-                  <div className="h-40 bg-[#D1B0C7] flex items-center justify-center text-white text-2xl text-center font-black px-5">
-                    {serie.imagen ? (
-                      <img
-                        src={serie.imagen}
-                        alt={serie.nombre}
-                        className="h-full w-full object-cover"
-                      />
-                    ) : (
-                      serie.nombre
-                    )}
-                  </div>
+              {sortedSeries.map((serie) => {
+                const serieImages =
+                  Array.isArray(serie.imagenes) && serie.imagenes.length > 0
+                    ? serie.imagenes
+                    : serie.imagen
+                    ? [serie.imagen]
+                    : [];
 
-                  <div className="p-6">
-                    <div className="flex flex-wrap gap-2">
-                      <span className="rounded-full bg-[#F7D9D8] px-3 py-1 text-xs font-black">
-                        {getSeriesStatus(serie)}
-                      </span>
+                return (
+                  <article
+                    key={getId(serie)}
+                    className="rounded-[28px] bg-white border border-[#87CCC8]/20 smika-shadow overflow-hidden"
+                  >
+                    <AutoCarousel
+                      images={serieImages}
+                      alt={serie.nombre}
+                      heightClassName="h-44"
+                      className="rounded-none"
+                    />
 
-                      {serie.pais && (
-                        <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
-                          {serie.pais}
+                    <div className="p-6">
+                      <div className="flex flex-wrap gap-2">
+                        <span className="rounded-full bg-[#F7D9D8] px-3 py-1 text-xs font-black">
+                          {getSeriesStatus(serie)}
                         </span>
-                      )}
-                    </div>
 
-                    <h3 className="mt-4 text-xl font-black">
-                      {serie.nombre}
-                    </h3>
+                        {serie.pais && (
+                          <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
+                            {serie.pais}
+                          </span>
+                        )}
+                      </div>
 
-                    <div className="mt-3 grid gap-2 text-sm text-gray-600">
-                      <p>
-                        <strong>Categoría:</strong>{" "}
-                        {serie.categoriaNombre || "Series"}
-                      </p>
-                      <p>
-                        <strong>Origen:</strong>{" "}
-                        {serie.origenNombre || "Variado"}
-                      </p>
-                      <p>
-                        <strong>Tipo:</strong> {serie.tipo || "Historia"}
-                      </p>
-                      {serie.genero && (
+                      <h3 className="mt-4 text-xl font-black">
+                        {serie.nombre}
+                      </h3>
+
+                      <div className="mt-3 grid gap-2 text-sm text-gray-600">
                         <p>
-                          <strong>Género:</strong> {serie.genero}
+                          <strong>Categoría:</strong>{" "}
+                          {serie.categoriaNombre || "Series"}
                         </p>
-                      )}
-                      {serie.autor && (
+
                         <p>
-                          <strong>Autor/a:</strong> {serie.autor}
+                          <strong>Origen:</strong>{" "}
+                          {serie.origenNombre || "Variado"}
                         </p>
-                      )}
+
+                        <p>
+                          <strong>Tipo:</strong> {serie.tipo || "Historia"}
+                        </p>
+
+                        {serie.genero && (
+                          <p>
+                            <strong>Género:</strong> {serie.genero}
+                          </p>
+                        )}
+
+                        {serie.autor && (
+                          <p>
+                            <strong>Autor/a:</strong> {serie.autor}
+                          </p>
+                        )}
+
+                        <p>
+                          <strong>Imágenes:</strong> {serieImages.length}
+                        </p>
+                      </div>
+
+                      <div className="mt-5 flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => openEditForm(serie)}
+                          className="smika-button-primary flex-1 flex items-center justify-center gap-2"
+                        >
+                          <Pencil size={16} />
+                          Editar
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleToggleStatus(serie)}
+                          disabled={saving}
+                          className="h-11 w-11 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-60"
+                          title={serie.activo ? "Desactivar" : "Activar"}
+                        >
+                          <Power
+                            size={17}
+                            className={
+                              serie.activo ? "text-gray-500" : "text-red-500"
+                            }
+                          />
+                        </button>
+                      </div>
                     </div>
-
-                    <div className="mt-5 flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => openEditForm(serie)}
-                        className="smika-button-primary flex-1 flex items-center justify-center gap-2"
-                      >
-                        <Pencil size={16} />
-                        Editar
-                      </button>
-
-                      <button
-                        type="button"
-                        className="h-11 w-11 rounded-full bg-[#F8F6F7] flex items-center justify-center"
-                        title="Imagen"
-                      >
-                        <Image size={17} />
-                      </button>
-
-                      <button
-                        type="button"
-                        onClick={() => handleToggleStatus(serie)}
-                        disabled={saving}
-                        className="h-11 w-11 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-60"
-                        title={serie.activo ? "Desactivar" : "Activar"}
-                      >
-                        <Power
-                          size={17}
-                          className={
-                            serie.activo ? "text-gray-500" : "text-red-500"
-                          }
-                        />
-                      </button>
-                    </div>
-                  </div>
-                </article>
-              ))}
+                  </article>
+                );
+              })}
             </div>
           )}
         </>

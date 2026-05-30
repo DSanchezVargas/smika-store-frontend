@@ -63,6 +63,46 @@ function getRelatedName(value, fallback = "") {
   return value || fallback || "";
 }
 
+function getImageSource(image) {
+  if (!image) return "";
+
+  if (typeof image === "string") return image.trim();
+
+  if (typeof image === "object") {
+    return (
+      image.finalPreview ||
+      image.url ||
+      image.preview ||
+      image.src ||
+      image.imagen ||
+      ""
+    ).trim();
+  }
+
+  return "";
+}
+
+function normalizeImagesFromPayload(payload = {}) {
+  const imagesFromArray = Array.isArray(payload.imagenes)
+    ? payload.imagenes.map(getImageSource).filter(Boolean)
+    : [];
+
+  const imagesFromText = payload.imagenesTexto
+    ? payload.imagenesTexto
+        .split(",")
+        .map((image) => image.trim())
+        .filter(Boolean)
+    : [];
+
+  const mainImage = getImageSource(payload.imagen || payload.image);
+
+  const images = [mainImage, ...imagesFromArray, ...imagesFromText].filter(
+    Boolean
+  );
+
+  return [...new Set(images)];
+}
+
 function normalizeEstadoToDisponibilidad(estado = "") {
   const cleanEstado = estado.toString().toLowerCase();
 
@@ -168,6 +208,13 @@ function normalizeSeriesFromApi(serie = {}) {
     serie.origenNombre || serie.pais || "Variado"
   );
 
+  const imagenes = normalizeImagesFromPayload({
+    imagen: serie.imagen,
+    imagenes: serie.imagenes
+  });
+
+  const mainImage = serie.imagen || imagenes[0] || "";
+
   return {
     ...serie,
 
@@ -178,7 +225,9 @@ function normalizeSeriesFromApi(serie = {}) {
     slug: serie.slug || createSlug(serie.nombre || mongoId),
 
     descripcion: serie.descripcion || "",
-    imagen: serie.imagen || "",
+
+    imagen: mainImage,
+    imagenes,
 
     categoria: categoriaNombre,
     categoriaNombre,
@@ -193,6 +242,7 @@ function normalizeSeriesFromApi(serie = {}) {
     pais: serie.pais || "V",
     tipo: serie.tipo || serie.categoria || "Historia",
     genero: serie.genero || "",
+
     autor:
       serie.autor ||
       serie.creadoresNombre?.join(", ") ||
@@ -235,7 +285,8 @@ function normalizeCharacterFromApi(character = {}) {
     serie: serieNombre,
     serieNombre,
 
-    estado: character.estado || (character.needsReview ? "Faltan detalles" : "Completo"),
+    estado:
+      character.estado || (character.needsReview ? "Faltan detalles" : "Completo"),
     needsReview: Boolean(character.needsReview),
 
     activo: character.activo !== false
@@ -262,6 +313,13 @@ function normalizeEventFromApi(event = {}) {
     event.origenNombre || event.pais || "Variado"
   );
 
+  const imagenes = normalizeImagesFromPayload({
+    imagen: event.imagen,
+    imagenes: event.imagenes
+  });
+
+  const mainImage = event.imagen || imagenes[0] || "";
+
   return {
     ...event,
 
@@ -273,8 +331,9 @@ function normalizeEventFromApi(event = {}) {
     slug: event.slug || createSlug(titulo || mongoId),
 
     descripcion: event.descripcion || "",
-    imagen: event.imagen || "",
-    imagenes: Array.isArray(event.imagenes) ? event.imagenes : [],
+
+    imagen: mainImage,
+    imagenes,
 
     categoria: categoriaNombre,
     categoriaNombre,
@@ -380,25 +439,25 @@ function buildProductPayloadForApi(payload = {}) {
     tiempoEstimado: payload.tiempoEstimado || "",
 
     adulto: Boolean(payload.adulto),
-    esNuevo:
-      payload.esNuevo !== undefined ? Boolean(payload.esNuevo) : true,
+    esNuevo: payload.esNuevo !== undefined ? Boolean(payload.esNuevo) : true,
     esDestacado:
-      payload.esDestacado !== undefined
-        ? Boolean(payload.esDestacado)
-        : false,
+      payload.esDestacado !== undefined ? Boolean(payload.esDestacado) : false,
 
     activo:
-      payload.activo !== undefined
-        ? Boolean(payload.activo)
-        : estado !== "Inactivo"
+      payload.activo !== undefined ? Boolean(payload.activo) : estado !== "Inactivo"
   };
 }
 
 function buildSeriesPayloadForApi(payload = {}) {
+  const imagenes = normalizeImagesFromPayload(payload);
+  const mainImage = getImageSource(payload.imagen) || imagenes[0] || "";
+
   return {
     nombre: payload.nombre || payload.name || "",
     descripcion: payload.descripcion || "",
-    imagen: payload.imagen || "",
+
+    imagen: mainImage,
+    imagenes,
 
     categoriaPrincipal: isMongoObjectId(payload.categoriaPrincipal)
       ? payload.categoriaPrincipal
@@ -421,6 +480,9 @@ function buildSeriesPayloadForApi(payload = {}) {
       payload.origenNombre || payload.paisNombre || payload.origen || "Variado",
 
     pais: payload.pais || "V",
+
+    tipo: payload.tipo || "Historia",
+    genero: payload.genero || "",
 
     creadores: Array.isArray(payload.creadores)
       ? payload.creadores.filter(isMongoObjectId)
@@ -468,11 +530,11 @@ function buildCharacterPayloadForApi(payload = {}) {
       ? payload.serieNombre || ""
       : serieValue || "Sin serie definida",
 
-    estado: payload.estado || (payload.needsReview ? "Faltan detalles" : "Completo"),
+    estado:
+      payload.estado || (payload.needsReview ? "Faltan detalles" : "Completo"),
     needsReview: Boolean(payload.needsReview),
 
-    activo:
-      payload.activo !== undefined ? Boolean(payload.activo) : true
+    activo: payload.activo !== undefined ? Boolean(payload.activo) : true
   };
 }
 
@@ -482,13 +544,16 @@ function buildEventPayloadForApi(payload = {}) {
   const categoriaValue = payload.categoria || payload.categoriaNombre || "";
   const origenValue = payload.origen || payload.origenNombre || payload.pais || "";
 
+  const imagenes = normalizeImagesFromPayload(payload);
+  const mainImage = getImageSource(payload.imagen) || imagenes[0] || "";
+
   return {
     titulo,
     nombre: titulo,
     descripcion: payload.descripcion || "",
-    imagen: payload.imagen || "",
 
-    imagenes: Array.isArray(payload.imagenes) ? payload.imagenes : [],
+    imagen: mainImage,
+    imagenes,
 
     categoria: isMongoObjectId(categoriaValue) ? categoriaValue : "",
     categoriaNombre: isMongoObjectId(categoriaValue)
@@ -519,8 +584,7 @@ function buildEventPayloadForApi(payload = {}) {
       ? payload.productos.filter(isMongoObjectId)
       : [],
 
-    activo:
-      payload.activo !== undefined ? Boolean(payload.activo) : true
+    activo: payload.activo !== undefined ? Boolean(payload.activo) : true
   };
 }
 
@@ -748,7 +812,8 @@ export function AdminDataProvider({ children }) {
       createdProduct,
       ...currentProducts.filter(
         (product) =>
-          (product._id || product.id) !== (createdProduct._id || createdProduct.id)
+          (product._id || product.id) !==
+          (createdProduct._id || createdProduct.id)
       )
     ]);
 
@@ -835,7 +900,9 @@ export function AdminDataProvider({ children }) {
     updateCollection("series", (currentSeries) => [
       createdSeries,
       ...currentSeries.filter(
-        (serie) => (serie._id || serie.id) !== (createdSeries._id || createdSeries.id)
+        (serie) =>
+          (serie._id || serie.id) !==
+          (createdSeries._id || createdSeries.id)
       )
     ]);
 

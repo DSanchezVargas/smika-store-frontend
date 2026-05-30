@@ -3,51 +3,214 @@ import { Link, useParams } from "react-router-dom";
 import {
   Bell,
   CalendarDays,
-  ChevronLeft,
-  ChevronRight,
   Heart,
   Settings,
   SlidersHorizontal
 } from "lucide-react";
 
+import AutoCarousel from "../../components/common/AutoCarousel";
 import ProductCard from "../../components/product/ProductCard";
-import { mockEvents } from "../../data/mockEvents";
-import { mockProducts } from "../../data/mockProducts";
-import { priceRangeConfig } from "../../data/catalogFilters";
+import { useAdminData } from "../../context/AdminDataContext";
 import { useAuth } from "../../context/AuthContext";
+import { priceRangeConfig } from "../../data/catalogFilters";
+
+function createSlug(text = "") {
+  return text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+}
+
+function normalizeText(text = "") {
+  return text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+function getId(item) {
+  return item?._id || item?.id || "";
+}
+
+function getEventTitle(event) {
+  return event?.titulo || event?.nombre || event?.title || "Evento Smika";
+}
+
+function getEventSlug(event) {
+  return event?.slug || createSlug(getEventTitle(event) || getId(event));
+}
+
+function getEventImages(event) {
+  const images = Array.isArray(event?.imagenes)
+    ? event.imagenes.filter(Boolean)
+    : [];
+
+  if (event?.imagen && !images.includes(event.imagen)) {
+    images.unshift(event.imagen);
+  }
+
+  if (Array.isArray(event?.images)) {
+    event.images.forEach((image) => {
+      if (image && !images.includes(image)) images.push(image);
+    });
+  }
+
+  return images;
+}
+
+function getProductId(product) {
+  if (typeof product === "string") return product;
+  return product?._id || product?.id || "";
+}
+
+function getProductPrice(product) {
+  return Number(
+    product.price ||
+      product.precio ||
+      product.precioReferencial ||
+      product.precioReferencialUnitario ||
+      0
+  );
+}
+
+function getProductType(product) {
+  return (
+    product.tipoProducto ||
+    product.typeProduct ||
+    product.tipo ||
+    product.type ||
+    "Producto"
+  );
+}
+
+function productBelongsToEvent(product, event) {
+  const eventId = getId(event);
+  const eventSlug = getEventSlug(event);
+  const eventTitle = getEventTitle(event);
+
+  const productEventId =
+    typeof product.evento === "object"
+      ? getId(product.evento)
+      : product.evento || "";
+
+  const productEventName =
+    product.eventoNombre ||
+    product.event ||
+    product.eventName ||
+    "";
+
+  const productEventSlug =
+    product.eventSlug ||
+    createSlug(productEventName || productEventId);
+
+  if (eventId && productEventId === eventId) return true;
+  if (eventSlug && productEventSlug === eventSlug) return true;
+
+  return (
+    normalizeText(productEventName) === normalizeText(eventTitle) ||
+    normalizeText(productEventName) === normalizeText(event.serieNombre || "")
+  );
+}
+
+function formatDate(value) {
+  if (!value) return "Fecha por confirmar";
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) return value;
+
+  return date.toLocaleDateString("es-PE", {
+    year: "numeric",
+    month: "long",
+    day: "numeric"
+  });
+}
+
+function isUpcomingEvent(event) {
+  const status = event?.estado || event?.status || "proximo";
+  return status === "proximo";
+}
+
+function getEventStatusText(event) {
+  const status = event?.estado || event?.status || "proximo";
+
+  const labels = {
+    proximo: "Evento próximo",
+    activo: "Evento actual",
+    actual: "Evento actual",
+    finalizado: "Evento finalizado",
+    cancelado: "Evento cancelado"
+  };
+
+  return labels[status] || "Evento próximo";
+}
 
 function EventDetailPage() {
   const { slug } = useParams();
   const { isAuthenticated, isStaff } = useAuth();
+  const { events, products } = useAdminData();
 
-  const [currentImage, setCurrentImage] = useState(0);
   const [maxPrice, setMaxPrice] = useState(priceRangeConfig.max);
   const [selectedType, setSelectedType] = useState("");
 
-  const event = mockEvents.find((item) => item.slug === slug);
+  const event = useMemo(() => {
+    return (events || []).find((item) => {
+      const itemSlug = getEventSlug(item);
+      const itemId = getId(item);
+
+      return itemSlug === slug || itemId === slug;
+    });
+  }, [events, slug]);
 
   const eventProducts = useMemo(() => {
-    return mockProducts.filter((product) => product.eventSlug === slug);
-  }, [slug]);
+    if (!event) return [];
+
+    const linkedProductIds = Array.isArray(event.productos)
+      ? event.productos.map(getProductId).filter(Boolean)
+      : [];
+
+    return (products || []).filter((product) => {
+      const productId = getProductId(product);
+
+      if (linkedProductIds.includes(productId)) return true;
+
+      return productBelongsToEvent(product, event);
+    });
+  }, [products, event]);
 
   const productTypes = useMemo(() => {
-    return [...new Set(eventProducts.map((product) => product.typeProduct))];
+    return [
+      ...new Set(eventProducts.map(getProductType).filter(Boolean))
+    ];
   }, [eventProducts]);
 
-  const visibleProducts = eventProducts.filter((product) => {
-    const matchesPrice = product.price <= maxPrice;
-    const matchesType = selectedType
-      ? product.typeProduct === selectedType
-      : true;
+  const visibleProducts = useMemo(() => {
+    return eventProducts.filter((product) => {
+      const matchesPrice = getProductPrice(product) <= maxPrice;
+      const matchesType = selectedType
+        ? getProductType(product) === selectedType
+        : true;
 
-    return matchesPrice && matchesType;
-  });
+      return matchesPrice && matchesType;
+    });
+  }, [eventProducts, maxPrice, selectedType]);
 
   if (!event) {
     return (
       <section className="container-smika py-12">
         <div className="rounded-[32px] bg-[#F8F6F7] p-8">
           <h2 className="text-3xl font-black">Evento no encontrado</h2>
+
+          <p className="mt-3 text-gray-600">
+            Es posible que el evento esté inactivo o que todavía no se haya
+            cargado desde el panel.
+          </p>
 
           <Link
             to="/programacion-eventos"
@@ -60,76 +223,60 @@ function EventDetailPage() {
     );
   }
 
-  const goPrevious = () => {
-    setCurrentImage((current) => {
-      if (current === 0) return event.images.length - 1;
-      return current - 1;
-    });
-  };
-
-  const goNext = () => {
-    setCurrentImage((current) => {
-      if (current === event.images.length - 1) return 0;
-      return current + 1;
-    });
-  };
+  const eventTitle = getEventTitle(event);
+  const eventSlug = getEventSlug(event);
+  const eventImages = getEventImages(event);
 
   return (
     <section className="container-smika py-12">
       <div className="rounded-[32px] bg-[#F8F6F7] p-8 mb-8">
         <p className="text-[#87CCC8] font-black">Evento Smika Store</p>
 
-        <h2 className="text-4xl font-black mt-2">{event.title}</h2>
+        <h2 className="text-4xl font-black mt-2">{eventTitle}</h2>
 
         <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-          {event.description}
+          {event.descripcion ||
+            event.description ||
+            "Evento registrado por Smika Store."}
         </p>
 
         <div className="mt-5 flex flex-wrap gap-3 text-sm font-bold">
           <span className="rounded-full bg-white px-4 py-2">
-            {event.status === "actual" ? "Evento actual" : "Evento próximo"}
+            {getEventStatusText(event)}
           </span>
 
           <span className="rounded-full bg-white px-4 py-2">
-            Serie fija: {event.series}
+            Serie fija: {event.serieNombre || event.series || "Sin serie"}
           </span>
 
           <span className="rounded-full bg-white px-4 py-2">
-            País/origen: {event.countryCode}
+            País/origen:{" "}
+            {event.origenNombre ||
+              event.country ||
+              event.countryCode ||
+              event.pais ||
+              "Variado"}
+          </span>
+
+          <span className="rounded-full bg-white px-4 py-2">
+            Imágenes: {eventImages.length}
           </span>
         </div>
       </div>
 
       <div className="smika-card smika-shadow overflow-hidden mb-10">
-        <div className="relative">
-          <img
-            src={event.images[currentImage]}
-            alt={event.title}
-            className="w-full h-[440px] object-cover"
-          />
-
-          <button
-            type="button"
-            onClick={goPrevious}
-            className="absolute left-5 top-1/2 -translate-y-1/2 h-12 w-12 rounded-full bg-white/95 flex items-center justify-center smika-shadow"
-          >
-            <ChevronLeft size={26} />
-          </button>
-
-          <button
-            type="button"
-            onClick={goNext}
-            className="absolute right-5 top-1/2 -translate-y-1/2 h-12 w-12 rounded-full bg-white/95 flex items-center justify-center smika-shadow"
-          >
-            <ChevronRight size={26} />
-          </button>
-        </div>
+        <AutoCarousel
+          images={eventImages}
+          alt={eventTitle}
+          heightClassName="h-[440px]"
+          className="rounded-none"
+        />
 
         <div className="p-6 flex flex-wrap items-center justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 text-[#D1B0C7] font-black">
               <CalendarDays size={18} />
-              {event.date}
+              {formatDate(event.fechaInicio || event.date)}
             </div>
 
             <h3 className="mt-2 text-2xl font-black">
@@ -137,32 +284,36 @@ function EventDetailPage() {
             </h3>
           </div>
 
-          {event.status === "proximo" && (
-            <>
-              {isStaff ? (
-                <Link
-                  to="/admin/eventos"
-                  className="smika-button-primary flex items-center gap-2"
-                >
-                  <Settings size={18} />
-                  Editar evento en admin
-                </Link>
-              ) : isAuthenticated ? (
-                <button className="smika-button-primary flex items-center gap-2">
-                  <Heart size={18} />
-                  Guardar evento
-                </button>
-              ) : (
-                <Link
-                  to={`/login?redirect=/programacion-eventos/${event.slug}`}
-                  className="smika-button-primary flex items-center gap-2"
-                >
-                  <Bell size={18} />
-                  Iniciar sesión para guardar
-                </Link>
-              )}
-            </>
-          )}
+          <div className="flex flex-wrap gap-3">
+            {isStaff && (
+              <Link
+                to="/admin/eventos"
+                className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center gap-2"
+              >
+                <Settings size={18} />
+                Gestionar evento
+              </Link>
+            )}
+
+            {isUpcomingEvent(event) && !isStaff && (
+              <>
+                {isAuthenticated ? (
+                  <button className="smika-button-primary flex items-center gap-2">
+                    <Heart size={18} />
+                    Guardar evento
+                  </button>
+                ) : (
+                  <Link
+                    to={`/login?redirect=/programacion-eventos/${eventSlug}`}
+                    className="smika-button-primary flex items-center gap-2"
+                  >
+                    <Bell size={18} />
+                    Iniciar sesión para guardar
+                  </Link>
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
@@ -177,7 +328,9 @@ function EventDetailPage() {
             <div className="rounded-3xl bg-[#F7D9D8]/50 p-4">
               <p className="text-sm font-black">Serie fija del evento</p>
 
-              <p className="mt-1 text-sm text-gray-600">{event.series}</p>
+              <p className="mt-1 text-sm text-gray-600">
+                {event.serieNombre || event.series || "Sin serie definida"}
+              </p>
 
               <p className="mt-2 text-xs text-gray-500 leading-5">
                 No se muestra filtro de serie porque este evento ya pertenece a
@@ -213,6 +366,7 @@ function EventDetailPage() {
 
             <label className="grid gap-2 text-sm font-bold">
               Tipo de producto
+
               <select
                 value={selectedType}
                 onChange={(event) => setSelectedType(event.target.value)}
@@ -235,16 +389,15 @@ function EventDetailPage() {
             <h3 className="font-black">Productos del evento</h3>
 
             <p className="mt-2 text-sm text-gray-600 leading-6">
-              La administradora podrá enlazar productos ya registrados a este
-              evento. Si el producto no existe, podrá crearlo desde el panel y
-              asociarlo directamente al evento.
+              Aquí aparecen los productos vinculados desde el panel de
+              administración o los productos que tienen este evento asignado.
             </p>
           </div>
 
           {visibleProducts.length > 0 ? (
             <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
               {visibleProducts.map((product) => (
-                <ProductCard key={product.id} product={product} />
+                <ProductCard key={getProductId(product)} product={product} />
               ))}
             </div>
           ) : (
