@@ -16,6 +16,7 @@ import {
   getProductTypes,
   updateProductType
 } from "../../services/productTypeService";
+import { useAdminData } from "../../context/AdminDataContext";
 
 const initialForm = {
   nombre: "",
@@ -23,6 +24,18 @@ const initialForm = {
   orden: 0,
   activo: true
 };
+
+const defaultProductTypes = [
+  "Stand de acrílico",
+  "Llavero",
+  "Photocard",
+  "Pin",
+  "Sticker",
+  "Print",
+  "Tomo",
+  "Merch",
+  "Pack"
+];
 
 function getId(item) {
   return item?._id || item?.id || "";
@@ -35,6 +48,61 @@ function normalizeText(text = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function uniqueText(values = []) {
+  return values.reduce((accumulator, value) => {
+    const cleanValue = value?.toString().trim();
+
+    if (!cleanValue) return accumulator;
+
+    const exists = accumulator.some(
+      (item) => normalizeText(item) === normalizeText(cleanValue)
+    );
+
+    if (!exists) accumulator.push(cleanValue);
+
+    return accumulator;
+  }, []);
+}
+
+function getName(item, fallback = "") {
+  if (!item) return fallback;
+
+  if (typeof item === "string") return item;
+
+  return item.nombre || item.titulo || item.name || fallback;
+}
+
+function normalizeArrayText(value) {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => normalizeArrayText(item))
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (value && typeof value === "object") {
+    return [getName(value)].filter(Boolean);
+  }
+
+  if (!value) return [];
+
+  return value
+    .toString()
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getProductTypesFromProduct(product) {
+  return uniqueText([
+    ...normalizeArrayText(product?.tiposProducto),
+    ...normalizeArrayText(product?.tipoProducto),
+    ...normalizeArrayText(product?.tipo),
+    ...normalizeArrayText(product?.type),
+    ...normalizeArrayText(product?.typeProduct)
+  ]);
 }
 
 function getProductTypeName(productType) {
@@ -65,7 +133,47 @@ function pickProductTypes(data) {
   return [];
 }
 
+function existsProductType(productTypes = [], name = "") {
+  return productTypes.some(
+    (productType) =>
+      normalizeText(productType.nombre) === normalizeText(name)
+  );
+}
+
+function mergeProductTypes(currentProductTypes = [], nextProductTypes = []) {
+  const merged = [...currentProductTypes];
+
+  nextProductTypes.forEach((productType) => {
+    const normalizedProductType = normalizeProductType(productType);
+    const productTypeId = getId(normalizedProductType);
+
+    const existingIndex = merged.findIndex((item) => {
+      const sameId =
+        productTypeId && getId(item) && getId(item) === productTypeId;
+
+      const sameName =
+        normalizeText(item.nombre) ===
+        normalizeText(normalizedProductType.nombre);
+
+      return sameId || sameName;
+    });
+
+    if (existingIndex >= 0) {
+      merged[existingIndex] = {
+        ...merged[existingIndex],
+        ...normalizedProductType
+      };
+    } else {
+      merged.push(normalizedProductType);
+    }
+  });
+
+  return merged;
+}
+
 function AdminProductTypesPage() {
+  const { products } = useAdminData();
+
   const [productTypes, setProductTypes] = useState([]);
   const [view, setView] = useState("list");
   const [editingProductType, setEditingProductType] = useState(null);
@@ -73,6 +181,25 @@ function AdminProductTypesPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  const productTypesUsedInProducts = useMemo(() => {
+    return uniqueText(
+      (products || []).flatMap((product) => getProductTypesFromProduct(product))
+    ).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
+  const expectedProductTypes = useMemo(() => {
+    return uniqueText([
+      ...defaultProductTypes,
+      ...productTypesUsedInProducts
+    ]).sort((a, b) => a.localeCompare(b));
+  }, [productTypesUsedInProducts]);
+
+  const missingProductTypes = useMemo(() => {
+    return expectedProductTypes.filter(
+      (typeName) => !existsProductType(productTypes, typeName)
+    );
+  }, [expectedProductTypes, productTypes]);
 
   const sortedProductTypes = useMemo(() => {
     return [...productTypes].sort((a, b) => {
@@ -180,22 +307,13 @@ function AdminProductTypesPage() {
   };
 
   const replaceProductType = (productType) => {
+    if (!productType) return;
+
     const normalizedProductType = normalizeProductType(productType);
-    const productTypeId = getId(normalizedProductType);
 
-    setProductTypes((currentProductTypes) => {
-      const exists = currentProductTypes.some(
-        (item) => getId(item) === productTypeId
-      );
-
-      if (!exists) {
-        return [normalizedProductType, ...currentProductTypes];
-      }
-
-      return currentProductTypes.map((item) =>
-        getId(item) === productTypeId ? normalizedProductType : item
-      );
-    });
+    setProductTypes((currentProductTypes) =>
+      mergeProductTypes(currentProductTypes, [normalizedProductType])
+    );
   };
 
   const handleSubmit = async (event) => {
@@ -267,7 +385,9 @@ function AdminProductTypesPage() {
         setMessage("Tipo de producto desactivado correctamente.");
       } else {
         const data = await updateProductType(productTypeId, {
-          ...productType,
+          nombre: productType.nombre,
+          descripcion: productType.descripcion || "",
+          orden: Number(productType.orden || 0),
           activo: true
         });
 
@@ -286,6 +406,75 @@ function AdminProductTypesPage() {
     }
   };
 
+  const handleSyncMissingProductTypes = async () => {
+    if (missingProductTypes.length === 0) {
+      setMessage("Todos los tipos de producto ya están sincronizados.");
+      return;
+    }
+
+    setSaving(true);
+    setMessage("Sincronizando tipos usados en productos...");
+
+    const createdProductTypes = [];
+    const failedProductTypes = [];
+
+    try {
+      for (const typeName of missingProductTypes) {
+        try {
+          const data = await createProductType({
+            nombre: typeName,
+            descripcion:
+              "Tipo sincronizado automáticamente desde productos o tipos sugeridos.",
+            orden: productTypes.length + createdProductTypes.length,
+            activo: true
+          });
+
+          const createdProductType = normalizeProductType(
+            data.productType || data.tipoProducto || data.data || data
+          );
+
+          createdProductTypes.push(createdProductType);
+        } catch (error) {
+          const errorMessage = error.message || "";
+
+          if (
+            errorMessage.toLowerCase().includes("existe") ||
+            errorMessage.toLowerCase().includes("duplicate") ||
+            errorMessage.toLowerCase().includes("duplicado")
+          ) {
+            continue;
+          }
+
+          failedProductTypes.push(typeName);
+        }
+      }
+
+      if (createdProductTypes.length > 0) {
+        setProductTypes((currentProductTypes) =>
+          mergeProductTypes(currentProductTypes, createdProductTypes)
+        );
+      }
+
+      await refreshProductTypes();
+
+      if (failedProductTypes.length > 0) {
+        setMessage(
+          `Se sincronizaron ${createdProductTypes.length} tipos. No se pudieron sincronizar: ${failedProductTypes.join(
+            ", "
+          )}.`
+        );
+      } else {
+        setMessage(
+          `Sincronización completada. Se crearon ${createdProductTypes.length} tipos faltantes sin borrar los existentes.`
+        );
+      }
+    } catch (error) {
+      setMessage(error.message || "No se pudo sincronizar los tipos faltantes.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   return (
     <section className="space-y-6">
       <div className="rounded-[32px] bg-white p-8 smika-shadow border border-[#87CCC8]/20">
@@ -298,26 +487,42 @@ function AdminProductTypesPage() {
             </h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Administra los tipos que se usan al crear productos. Estos valores
-              sirven para evitar escribir repetido y para filtrar productos en
-              catálogo o eventos.
+              Administra los tipos que se usan al crear productos. Esta pantalla
+              también puede sincronizar los tipos que ya están escritos en
+              productos antiguos para guardarlos como registros globales.
             </p>
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
             {view === "list" && (
-              <button
-                type="button"
-                onClick={refreshProductTypes}
-                disabled={loading || saving}
-                className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                <RefreshCw
-                  size={18}
-                  className={loading ? "animate-spin" : ""}
-                />
-                Recargar
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleSyncMissingProductTypes}
+                  disabled={saving || loading || missingProductTypes.length === 0}
+                  className="rounded-full bg-[#F7D9D8] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  {saving ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Tags size={18} />
+                  )}
+                  Sincronizar faltantes
+                </button>
+
+                <button
+                  type="button"
+                  onClick={refreshProductTypes}
+                  disabled={loading || saving}
+                  className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <RefreshCw
+                    size={18}
+                    className={loading ? "animate-spin" : ""}
+                  />
+                  Recargar
+                </button>
+              </>
             )}
 
             {view === "list" ? (
@@ -346,6 +551,40 @@ function AdminProductTypesPage() {
       {message && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
           {message}
+        </div>
+      )}
+
+      {view === "list" && missingProductTypes.length > 0 && (
+        <div className="rounded-[28px] bg-white p-5 smika-shadow border border-[#D1B0C7]/30">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <p className="font-black text-[#D1B0C7]">
+                Tipos pendientes de sincronizar
+              </p>
+
+              <p className="mt-2 text-sm text-gray-600 leading-6">
+                Estos tipos aparecen como sugeridos o ya están usados en
+                productos, pero todavía no existen como registros globales en
+                Gestión de tipos de producto.
+              </p>
+            </div>
+
+            <span className="rounded-full bg-[#F7D9D8] px-4 py-2 text-sm font-black">
+              {missingProductTypes.length} pendiente
+              {missingProductTypes.length === 1 ? "" : "s"}
+            </span>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {missingProductTypes.map((typeName) => (
+              <span
+                key={typeName}
+                className="rounded-full bg-[#F8F6F7] px-4 py-2 text-sm font-black"
+              >
+                {typeName}
+              </span>
+            ))}
+          </div>
         </div>
       )}
 
@@ -444,7 +683,7 @@ function AdminProductTypesPage() {
 
       {view === "list" && (
         <>
-          <div className="grid gap-4 md:grid-cols-3">
+          <div className="grid gap-4 md:grid-cols-4">
             <div className="rounded-[28px] bg-white p-5 smika-shadow border border-[#87CCC8]/20">
               <p className="text-sm font-black text-[#87CCC8]">Total</p>
               <p className="mt-2 text-3xl font-black">{productTypes.length}</p>
@@ -458,6 +697,13 @@ function AdminProductTypesPage() {
             <div className="rounded-[28px] bg-white p-5 smika-shadow border border-[#87CCC8]/20">
               <p className="text-sm font-black text-[#87CCC8]">Inactivos</p>
               <p className="mt-2 text-3xl font-black">{inactiveCount}</p>
+            </div>
+
+            <div className="rounded-[28px] bg-white p-5 smika-shadow border border-[#D1B0C7]/30">
+              <p className="text-sm font-black text-[#D1B0C7]">Faltantes</p>
+              <p className="mt-2 text-3xl font-black">
+                {missingProductTypes.length}
+              </p>
             </div>
           </div>
 
