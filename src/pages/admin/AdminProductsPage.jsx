@@ -42,6 +42,7 @@ const initialForm = {
   disponibilidad: "stock",
   estado: "Activo",
   tiempoEstimado: "",
+  sincronizarDisponibilidadEvento: true,
   adulto: false,
   esNuevo: true,
   esDestacado: false
@@ -685,6 +686,10 @@ function AdminProductsPage() {
     (option) => normalizeText(option.value) === normalizeText(form.disponibilidad)
   );
 
+  const hasLinkedEvent = Boolean(form.eventoNombre?.trim());
+  const automaticAvailabilityEnabled =
+    Boolean(form.sincronizarDisponibilidadEvento) && hasLinkedEvent;
+
   const refreshProductTypes = async () => {
     setLoadingProductTypes(true);
     setProductTypesError("");
@@ -817,6 +822,8 @@ function AdminProductsPage() {
       disponibilidad: product.disponibilidad || "stock",
       estado: product.estado || "Activo",
       tiempoEstimado: product.tiempoEstimado || "",
+      sincronizarDisponibilidadEvento:
+        product.sincronizarDisponibilidadEvento !== false,
       adulto: Boolean(product.adulto),
       esNuevo: product.esNuevo !== undefined ? Boolean(product.esNuevo) : true,
       esDestacado: Boolean(product.esDestacado)
@@ -1212,6 +1219,9 @@ function AdminProductsPage() {
       disponibilidad: form.disponibilidad,
       estado: form.estado,
       tiempoEstimado: form.tiempoEstimado.trim(),
+      sincronizarDisponibilidadEvento: Boolean(
+        form.sincronizarDisponibilidadEvento
+      ),
       adulto: Boolean(form.adulto),
       esNuevo: Boolean(form.esNuevo),
       esDestacado: Boolean(form.esDestacado),
@@ -1620,7 +1630,8 @@ function AdminProductsPage() {
               <select
                 value={selectedAvailability?.value || form.disponibilidad || "stock"}
                 onChange={(event) => handleAvailabilityChange(event.target.value)}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                disabled={automaticAvailabilityEnabled}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
               >
                 {availabilityOptions.map((option) => (
                   <option key={`${option.value}-${option.id}`} value={option.value}>
@@ -1632,6 +1643,14 @@ function AdminProductsPage() {
               <span className="text-xs font-medium text-gray-500 leading-5">
                 Las opciones vienen de Gestión de disponibilidades. Para crear o borrar duplicados, entra a /admin/disponibilidades.
               </span>
+              {automaticAvailabilityEnabled && (
+                <span className="text-xs font-black text-[#D1B0C7] leading-5">
+                  La disponibilidad está sincronizada con el evento: antes de la
+                  fecha de inicio será Preventa y desde esa fecha será Por pedido
+                  según hora Perú. Para editarla manualmente, desactiva la
+                  sincronización.
+                </span>
+              )}
             </label>
 
             <label className="grid gap-2 text-sm font-black">
@@ -1662,7 +1681,8 @@ function AdminProductsPage() {
                 name="estado"
                 value={form.estado}
                 onChange={handleChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                disabled={automaticAvailabilityEnabled}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none disabled:cursor-not-allowed disabled:bg-gray-100 disabled:text-gray-500"
               >
                 <option value="Activo">Activo</option>
                 <option value="Preventa">Preventa</option>
@@ -1670,9 +1690,41 @@ function AdminProductsPage() {
                 <option value="Agotado">Agotado</option>
                 <option value="Inactivo">Inactivo</option>
               </select>
+              {automaticAvailabilityEnabled && (
+                <span className="text-xs font-black text-[#D1B0C7] leading-5">
+                  El estado interno también se ajustará automáticamente con la
+                  fecha de inicio del evento.
+                </span>
+              )}
             </label>
 
             <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4 lg:col-span-2">
+              <label className="flex items-center justify-between gap-4 text-sm font-black">
+                Sincronizar disponibilidad con fecha del evento
+                <input
+                  type="checkbox"
+                  name="sincronizarDisponibilidadEvento"
+                  checked={form.sincronizarDisponibilidadEvento}
+                  onChange={handleChange}
+                  disabled={!hasLinkedEvent}
+                  className="h-5 w-5"
+                />
+              </label>
+
+              <p className="text-xs text-gray-500 leading-5">
+                Si el producto tiene evento vinculado y esta opción está activa,
+                antes de la fecha de inicio del evento será Preventa y desde esa
+                fecha será Por pedido según hora Perú. Si quieres controlar
+                manualmente disponibilidad y estado interno, desactiva esta
+                opción.
+              </p>
+
+              {!hasLinkedEvent && (
+                <p className="text-xs font-black text-[#D1B0C7] leading-5">
+                  Selecciona o crea un evento para activar esta sincronización.
+                </p>
+              )}
+
               <label className="flex items-center justify-between gap-4 text-sm font-black">
                 Producto nuevo
                 <input
@@ -1882,6 +1934,13 @@ function AdminProductsPage() {
                         <p>
                           <strong>Disponibilidad:</strong>{" "}
                           {getAvailabilityLabel(product.disponibilidad, availabilityOptions)}
+                        </p>
+
+                        <p>
+                          <strong>Sync evento:</strong>{" "}
+                          {product.sincronizarDisponibilidadEvento === false
+                            ? "Manual"
+                            : "Automática"}
                         </p>
 
                         {product.tiempoEstimado && (
