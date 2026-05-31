@@ -1,14 +1,15 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   BookOpen,
+  ChevronLeft,
   ChevronRight,
   Image as ImageIcon,
-  Sparkles
+  Sparkles,
+  X
 } from "lucide-react";
 
-import AutoCarousel from "../../components/common/AutoCarousel";
 import ProductCard from "../../components/product/ProductCard";
 import { useAdminData } from "../../context/AdminDataContext";
 import { getPublicProducts } from "../../utils/publicProducts";
@@ -127,9 +128,83 @@ function productBelongsToSeries(product, serie) {
   return normalizeText(getProductSeriesName(product)) === normalizeText(serieName);
 }
 
+function ImageLightbox({ images, title, currentIndex, onClose, onMove }) {
+  if (currentIndex === null || currentIndex === undefined) return null;
+
+  const currentImage = images[currentIndex];
+
+  if (!currentImage) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-6xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute -top-12 right-0 h-10 w-10 rounded-full bg-white text-[#2F2F2F] flex items-center justify-center shadow-lg"
+          title="Cerrar"
+        >
+          <X size={22} />
+        </button>
+
+        {images.length > 1 && (
+          <button
+            type="button"
+            onClick={() => onMove(-1)}
+            className="absolute left-2 top-1/2 z-10 h-12 w-12 -translate-y-1/2 rounded-full bg-white/95 text-[#2F2F2F] flex items-center justify-center shadow-lg"
+            title="Imagen anterior"
+          >
+            <ChevronLeft size={26} />
+          </button>
+        )}
+
+        <div className="rounded-[32px] bg-white p-3 shadow-2xl">
+          <div className="flex max-h-[82vh] min-h-[280px] items-center justify-center rounded-[24px] bg-[#F8F6F7]">
+            <img
+              src={currentImage}
+              alt={`${title} imagen ${currentIndex + 1}`}
+              className="max-h-[78vh] w-full object-contain"
+            />
+          </div>
+        </div>
+
+        {images.length > 1 && (
+          <button
+            type="button"
+            onClick={() => onMove(1)}
+            className="absolute right-2 top-1/2 z-10 h-12 w-12 -translate-y-1/2 rounded-full bg-white/95 text-[#2F2F2F] flex items-center justify-center shadow-lg"
+            title="Imagen siguiente"
+          >
+            <ChevronRight size={26} />
+          </button>
+        )}
+
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <span className="rounded-full bg-white px-4 py-2 text-sm font-black text-[#2F2F2F]">
+            {currentIndex + 1} / {images.length}
+          </span>
+
+          <p className="hidden rounded-full bg-white/15 px-4 py-2 text-sm font-bold text-white md:block">
+            {title}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SeriesDetailPage() {
   const { slug } = useParams();
   const { products, series } = useAdminData();
+
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
 
   const currentSeries = useMemo(() => {
     return (series || []).find((serie) => {
@@ -160,6 +235,28 @@ function SeriesDetailPage() {
       });
   }, [products, currentSeries]);
 
+  const moveSelectedImage = (direction) => {
+    if (galleryImages.length <= 1) return;
+
+    setSelectedImageIndex((currentIndex) => {
+      return (
+        (currentIndex + direction + galleryImages.length) %
+        galleryImages.length
+      );
+    });
+  };
+
+  const moveLightboxImage = (direction) => {
+    if (galleryImages.length <= 1) return;
+
+    setLightboxIndex((currentIndex) => {
+      return (
+        (currentIndex + direction + galleryImages.length) %
+        galleryImages.length
+      );
+    });
+  };
+
   if (!currentSeries) {
     return (
       <section className="container-smika py-12">
@@ -187,7 +284,7 @@ function SeriesDetailPage() {
   }
 
   const title = getSeriesTitle(currentSeries);
-  const coverImage = galleryImages[0] || "";
+  const selectedImage = galleryImages[selectedImageIndex] || galleryImages[0] || "";
 
   return (
     <section className="container-smika py-12">
@@ -203,14 +300,71 @@ function SeriesDetailPage() {
         <div className="grid gap-0 lg:grid-cols-[0.95fr_1.05fr]">
           <div className="bg-[#F8F6F7] p-6 lg:p-8">
             {galleryImages.length > 0 ? (
-              <AutoCarousel
-                images={galleryImages}
-                alt={title}
-                heightClassName="h-[420px]"
-                fit="contain"
-                className="bg-white"
-                showEmpty
-              />
+              <div className="space-y-4">
+                <div className="relative flex h-[420px] items-center justify-center overflow-hidden rounded-[28px] bg-white">
+                  <button
+                    type="button"
+                    onClick={() => setLightboxIndex(selectedImageIndex)}
+                    className="h-full w-full cursor-zoom-in"
+                    title="Ver imagen en grande"
+                  >
+                    <img
+                      src={selectedImage}
+                      alt={title}
+                      className="h-full w-full object-contain"
+                    />
+                  </button>
+
+                  {galleryImages.length > 1 && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => moveSelectedImage(-1)}
+                        className="absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full bg-white/95 text-[#2F2F2F] flex items-center justify-center shadow-lg"
+                        title="Imagen anterior"
+                      >
+                        <ChevronLeft size={23} />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => moveSelectedImage(1)}
+                        className="absolute right-4 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full bg-white/95 text-[#2F2F2F] flex items-center justify-center shadow-lg"
+                        title="Imagen siguiente"
+                      >
+                        <ChevronRight size={23} />
+                      </button>
+                    </>
+                  )}
+                </div>
+
+                {galleryImages.length > 1 && (
+                  <div className="grid grid-cols-4 gap-3">
+                    {galleryImages.slice(0, 8).map((image, index) => (
+                      <button
+                        key={`${image}-${index}`}
+                        type="button"
+                        onClick={() => {
+                          setSelectedImageIndex(index);
+                          setLightboxIndex(index);
+                        }}
+                        className={`h-24 overflow-hidden rounded-2xl bg-white ring-2 transition ${
+                          selectedImageIndex === index
+                            ? "ring-[#87CCC8]"
+                            : "ring-transparent"
+                        }`}
+                        title={`Ver imagen ${index + 1}`}
+                      >
+                        <img
+                          src={image}
+                          alt={`${title} miniatura ${index + 1}`}
+                          className="h-full w-full object-contain transition hover:scale-105"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             ) : (
               <div className="flex h-[420px] items-center justify-center rounded-[28px] bg-white text-gray-400">
                 <ImageIcon size={48} />
@@ -268,18 +422,6 @@ function SeriesDetailPage() {
                 <strong>Productos relacionados:</strong> {relatedProducts.length}
               </p>
             </div>
-
-            {coverImage && (
-              <a
-                href={coverImage}
-                target="_blank"
-                rel="noreferrer"
-                className="mt-5 inline-flex items-center gap-2 font-black text-[#87CCC8]"
-              >
-                Ver portada en grande
-                <ChevronRight size={18} />
-              </a>
-            )}
           </div>
         </div>
       </div>
@@ -317,6 +459,14 @@ function SeriesDetailPage() {
           </div>
         )}
       </div>
+
+      <ImageLightbox
+        images={galleryImages}
+        title={title}
+        currentIndex={lightboxIndex}
+        onClose={() => setLightboxIndex(null)}
+        onMove={moveLightboxImage}
+      />
     </section>
   );
 }

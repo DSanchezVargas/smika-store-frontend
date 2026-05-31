@@ -5,14 +5,16 @@ import {
   CalendarDays,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Heart,
   Image as ImageIcon,
   Settings,
   SlidersHorizontal,
-  Sparkles
+  Sparkles,
+  X
 } from "lucide-react";
 
-import AutoCarousel from "../../components/common/AutoCarousel";
 import ProductCard from "../../components/product/ProductCard";
 import { useAdminData } from "../../context/AdminDataContext";
 import { useAuth } from "../../context/AuthContext";
@@ -100,7 +102,10 @@ function getEventCarouselImages(event) {
 }
 
 function getEventGalleryImages(event) {
-  return uniqueImages([getEventCoverImage(event), ...getEventCarouselImages(event)]);
+  return uniqueImages([
+    getEventCoverImage(event),
+    ...getEventCarouselImages(event)
+  ]);
 }
 
 function getEventSeries(event) {
@@ -130,6 +135,22 @@ function getEventSeriesText(event) {
   const series = getEventSeries(event);
 
   return series.length > 0 ? series.join(", ") : "Sin serie fija";
+}
+
+function getEventTypes(event) {
+  const types = [
+    ...normalizeArrayText(event?.tiposEvento),
+    ...normalizeArrayText(event?.tipoEvento),
+    ...normalizeArrayText(event?.tipo)
+  ];
+
+  const uniqueTypes = [...new Set(types)];
+
+  return uniqueTypes.length > 0 ? uniqueTypes : ["Otro"];
+}
+
+function getEventTypesText(event) {
+  return getEventTypes(event).join(", ");
 }
 
 function getProductId(product) {
@@ -353,10 +374,120 @@ function getEventPreferenceId(event) {
   return getId(event) || getEventSlug(event);
 }
 
+function ImageLightbox({ images, title, currentIndex, onClose, onMove }) {
+  if (currentIndex === null || currentIndex === undefined) return null;
+
+  const currentImage = images[currentIndex];
+
+  if (!currentImage) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[9999] bg-black/85 backdrop-blur-sm flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-6xl"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          type="button"
+          onClick={onClose}
+          className="absolute -top-12 right-0 h-10 w-10 rounded-full bg-white text-[#2F2F2F] flex items-center justify-center shadow-lg"
+          title="Cerrar"
+        >
+          <X size={22} />
+        </button>
+
+        {images.length > 1 && (
+          <button
+            type="button"
+            onClick={() => onMove(-1)}
+            className="absolute left-2 top-1/2 z-10 h-12 w-12 -translate-y-1/2 rounded-full bg-white/95 text-[#2F2F2F] flex items-center justify-center shadow-lg"
+            title="Imagen anterior"
+          >
+            <ChevronLeft size={26} />
+          </button>
+        )}
+
+        <div className="rounded-[32px] bg-white p-3 shadow-2xl">
+          <div className="flex max-h-[82vh] min-h-[280px] items-center justify-center rounded-[24px] bg-[#F8F6F7]">
+            <img
+              src={currentImage}
+              alt={`${title} imagen ${currentIndex + 1}`}
+              className="max-h-[78vh] w-full object-contain"
+            />
+          </div>
+        </div>
+
+        {images.length > 1 && (
+          <button
+            type="button"
+            onClick={() => onMove(1)}
+            className="absolute right-2 top-1/2 z-10 h-12 w-12 -translate-y-1/2 rounded-full bg-white/95 text-[#2F2F2F] flex items-center justify-center shadow-lg"
+            title="Imagen siguiente"
+          >
+            <ChevronRight size={26} />
+          </button>
+        )}
+
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <span className="rounded-full bg-white px-4 py-2 text-sm font-black text-[#2F2F2F]">
+            {currentIndex + 1} / {images.length}
+          </span>
+
+          <p className="hidden rounded-full bg-white/15 px-4 py-2 text-sm font-bold text-white md:block">
+            {title}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function EventGallery({ event, title }) {
   const galleryImages = getEventGalleryImages(event);
   const coverImage = getEventCoverImage(event);
   const carouselImages = getEventCarouselImages(event);
+
+  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [lightboxIndex, setLightboxIndex] = useState(null);
+
+  const selectedImage = galleryImages[selectedIndex] || galleryImages[0] || "";
+
+  const coverIndex = coverImage
+    ? galleryImages.findIndex((image) => image === coverImage)
+    : -1;
+
+  const openLightbox = (index) => {
+    setLightboxIndex(index);
+  };
+
+  const closeLightbox = () => {
+    setLightboxIndex(null);
+  };
+
+  const moveSelectedImage = (direction) => {
+    if (galleryImages.length <= 1) return;
+
+    setSelectedIndex((currentIndex) => {
+      return (
+        (currentIndex + direction + galleryImages.length) %
+        galleryImages.length
+      );
+    });
+  };
+
+  const moveLightboxImage = (direction) => {
+    if (galleryImages.length <= 1) return;
+
+    setLightboxIndex((currentIndex) => {
+      return (
+        (currentIndex + direction + galleryImages.length) %
+        galleryImages.length
+      );
+    });
+  };
 
   if (galleryImages.length === 0) {
     return (
@@ -372,91 +503,172 @@ function EventGallery({ event, title }) {
   }
 
   return (
-    <div className="rounded-[36px] bg-white p-5 smika-shadow border border-[#87CCC8]/20">
-      <div className="flex flex-wrap items-end justify-between gap-3 px-1 pb-4">
-        <div>
-          <p className="flex items-center gap-2 text-[#87CCC8] font-black">
-            <Sparkles size={18} />
-            Galería del evento
+    <>
+      <div className="rounded-[36px] bg-white p-5 smika-shadow border border-[#87CCC8]/20">
+        <div className="flex flex-wrap items-end justify-between gap-3 px-1 pb-4">
+          <div>
+            <p className="flex items-center gap-2 text-[#87CCC8] font-black">
+              <Sparkles size={18} />
+              Galería del evento
+            </p>
+
+            <h3 className="mt-1 text-2xl font-black">
+              Portada e imágenes principales
+            </h3>
+          </div>
+
+          <p className="rounded-full bg-[#F8F6F7] px-4 py-2 text-xs font-black text-gray-600">
+            {galleryImages.length} imagen
+            {galleryImages.length === 1 ? "" : "es"}
           </p>
-
-          <h3 className="mt-1 text-2xl font-black">
-            Portada e imágenes principales
-          </h3>
         </div>
 
-        <p className="rounded-full bg-[#F8F6F7] px-4 py-2 text-xs font-black text-gray-600">
-          {galleryImages.length} imagen{galleryImages.length === 1 ? "" : "es"}
-        </p>
-      </div>
-
-      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
-        <div className="rounded-[32px] bg-[#F8F6F7] p-3">
-          <AutoCarousel
-            images={galleryImages}
-            alt={`${title} galería`}
-            heightClassName="h-[340px] md:h-[480px]"
-            fit="contain"
-            className="bg-white"
-            showEmpty
-          />
-        </div>
-
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
-          <div className="rounded-[32px] bg-[#F8F6F7] p-4">
-            <p className="mb-3 text-sm font-black">Portada</p>
-
-            <div className="flex h-52 items-center justify-center overflow-hidden rounded-[24px] bg-white">
-              {coverImage ? (
+        <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+          <div className="rounded-[32px] bg-[#F8F6F7] p-3">
+            <div className="relative flex h-[340px] items-center justify-center overflow-hidden rounded-[28px] bg-white md:h-[480px]">
+              <button
+                type="button"
+                onClick={() => openLightbox(selectedIndex)}
+                className="h-full w-full cursor-zoom-in"
+                title="Ver imagen en grande"
+              >
                 <img
-                  src={coverImage}
-                  alt={`${title} portada`}
+                  src={selectedImage}
+                  alt={`${title} imagen principal`}
                   className="h-full w-full object-contain"
                   loading="lazy"
                 />
-              ) : (
-                <ImageIcon size={36} className="text-gray-400" />
+              </button>
+
+              {galleryImages.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => moveSelectedImage(-1)}
+                    className="absolute left-4 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full bg-white/95 text-[#2F2F2F] flex items-center justify-center shadow-lg"
+                    title="Imagen anterior"
+                  >
+                    <ChevronLeft size={23} />
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => moveSelectedImage(1)}
+                    className="absolute right-4 top-1/2 h-11 w-11 -translate-y-1/2 rounded-full bg-white/95 text-[#2F2F2F] flex items-center justify-center shadow-lg"
+                    title="Imagen siguiente"
+                  >
+                    <ChevronRight size={23} />
+                  </button>
+
+                  <div className="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-2 rounded-full bg-white/90 px-3 py-2">
+                    {galleryImages.map((image, index) => (
+                      <button
+                        key={`${image}-dot-${index}`}
+                        type="button"
+                        onClick={() => setSelectedIndex(index)}
+                        className={`h-3 rounded-full transition-all ${
+                          selectedIndex === index
+                            ? "w-8 bg-[#87CCC8]"
+                            : "w-3 bg-[#D1B0C7]/50"
+                        }`}
+                        title={`Ver imagen ${index + 1}`}
+                      />
+                    ))}
+                  </div>
+                </>
               )}
             </div>
           </div>
 
-          <div className="rounded-[32px] bg-[#F8F6F7] p-4">
-            <p className="mb-3 text-sm font-black">Imágenes del carrusel</p>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+            <div className="rounded-[32px] bg-[#F8F6F7] p-4">
+              <p className="mb-3 text-sm font-black">Portada</p>
 
-            {carouselImages.length > 0 ? (
-              <div className="grid grid-cols-2 gap-3">
-                {carouselImages.slice(0, 4).map((image, index) => (
-                  <a
-                    key={`${image}-${index}`}
-                    href={image}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group relative flex h-24 items-center justify-center overflow-hidden rounded-[20px] bg-white"
-                  >
-                    <img
-                      src={image}
-                      alt={`${title} miniatura ${index + 1}`}
-                      className="h-full w-full object-contain transition duration-300 group-hover:scale-105"
-                      loading="lazy"
-                    />
+              <button
+                type="button"
+                onClick={() => {
+                  if (coverIndex >= 0) {
+                    setSelectedIndex(coverIndex);
+                    openLightbox(coverIndex);
+                  }
+                }}
+                className="flex h-52 w-full cursor-zoom-in items-center justify-center overflow-hidden rounded-[24px] bg-white"
+                title="Ver portada en grande"
+              >
+                {coverImage ? (
+                  <img
+                    src={coverImage}
+                    alt={`${title} portada`}
+                    className="h-full w-full object-contain transition duration-300 hover:scale-[1.03]"
+                    loading="lazy"
+                  />
+                ) : (
+                  <ImageIcon size={36} className="text-gray-400" />
+                )}
+              </button>
+            </div>
 
-                    {index === 3 && carouselImages.length > 4 && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-black/45 text-sm font-black text-white">
-                        +{carouselImages.length - 4}
-                      </div>
-                    )}
-                  </a>
-                ))}
-              </div>
-            ) : (
-              <div className="flex h-24 items-center justify-center rounded-[20px] bg-white text-sm font-black text-gray-400">
-                Sin imágenes adicionales
-              </div>
-            )}
+            <div className="rounded-[32px] bg-[#F8F6F7] p-4">
+              <p className="mb-3 text-sm font-black">Imágenes del carrusel</p>
+
+              {carouselImages.length > 0 ? (
+                <div className="grid grid-cols-2 gap-3">
+                  {carouselImages.slice(0, 4).map((image, index) => {
+                    const realIndex = galleryImages.findIndex(
+                      (galleryImage) => galleryImage === image
+                    );
+
+                    return (
+                      <button
+                        key={`${image}-${index}`}
+                        type="button"
+                        onClick={() => {
+                          const nextIndex = realIndex >= 0 ? realIndex : index;
+
+                          setSelectedIndex(nextIndex);
+                          openLightbox(nextIndex);
+                        }}
+                        className={`group relative flex h-24 cursor-zoom-in items-center justify-center overflow-hidden rounded-[20px] bg-white ring-2 transition ${
+                          selectedIndex === realIndex
+                            ? "ring-[#87CCC8]"
+                            : "ring-transparent"
+                        }`}
+                        title={`Ver imagen ${index + 1}`}
+                      >
+                        <img
+                          src={image}
+                          alt={`${title} miniatura ${index + 1}`}
+                          className="h-full w-full object-contain transition duration-300 group-hover:scale-105"
+                          loading="lazy"
+                        />
+
+                        {index === 3 && carouselImages.length > 4 && (
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/45 text-sm font-black text-white">
+                            +{carouselImages.length - 4}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="flex h-24 items-center justify-center rounded-[20px] bg-white text-sm font-black text-gray-400">
+                  Sin imágenes adicionales
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    </div>
+
+      <ImageLightbox
+        images={galleryImages}
+        title={title}
+        currentIndex={lightboxIndex}
+        onClose={closeLightbox}
+        onMove={moveLightboxImage}
+      />
+    </>
   );
 }
 
@@ -507,7 +719,9 @@ function EventDetailPage() {
   }, [eventProducts]);
 
   const productCharacters = useMemo(() => {
-    const characters = eventProducts.flatMap(getProductCharacters).filter(Boolean);
+    const characters = eventProducts
+      .flatMap(getProductCharacters)
+      .filter(Boolean);
 
     return [...new Set(characters)].sort((a, b) => a.localeCompare(b));
   }, [eventProducts]);
@@ -678,7 +892,7 @@ function EventDetailPage() {
               {formatDate(event.fechaInicio || event.date)}
             </div>
 
-            <div className="mt-4 max-w-4xl whitespace-pre-line text-gray-700 leading-8">
+            <div className="mt-4 max-w-4xl whitespace-pre-wrap text-gray-700 leading-8">
               {event.descripcion ||
                 event.description ||
                 "Evento registrado por Smika Store."}
@@ -690,7 +904,7 @@ function EventDetailPage() {
               </span>
 
               <span className="rounded-full bg-white px-4 py-2">
-                Tipo: {event.tipoEvento || event.tipo || "Otro"}
+                Tipo: {getEventTypesText(event)}
               </span>
 
               <span className="rounded-full bg-white px-4 py-2">
@@ -772,7 +986,10 @@ function EventDetailPage() {
                           Guardar evento
 
                           {eventIsSaved && (
-                            <Check size={17} className="ml-auto text-[#87CCC8]" />
+                            <Check
+                              size={17}
+                              className="ml-auto text-[#87CCC8]"
+                            />
                           )}
                         </button>
 
@@ -785,7 +1002,10 @@ function EventDetailPage() {
                           Avisarme antes de terminar
 
                           {eventReminderEnabled && (
-                            <Check size={17} className="ml-auto text-[#87CCC8]" />
+                            <Check
+                              size={17}
+                              className="ml-auto text-[#87CCC8]"
+                            />
                           )}
                         </button>
 
