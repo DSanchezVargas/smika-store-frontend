@@ -13,6 +13,7 @@ import {
 
 import ImageDropzone from "../../components/admin/ImageDropzone";
 import CreatableSelect from "../../components/admin/CreatableSelect";
+import MultiCreatableSelect from "../../components/admin/MultiCreatableSelect";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 import { useAdminData } from "../../context/AdminDataContext";
 
@@ -24,6 +25,7 @@ const initialForm = {
   eventoNombre: "",
   origenNombre: "",
   tipoProducto: "",
+  tiposProducto: [],
   personajesNombre: [],
   material: "",
   precio: "",
@@ -37,7 +39,7 @@ const initialForm = {
   esDestacado: false
 };
 
-const productTypes = [
+const baseProductTypes = [
   "Stand de acrílico",
   "Llavero",
   "Photocard",
@@ -91,8 +93,32 @@ function getRelatedName(value, ...fallbacks) {
   return found ? found.toString().trim() : "";
 }
 
+function normalizeTiposFromProduct(product) {
+  const rawValue =
+    product?.tiposProducto ||
+    product?.tipoProducto ||
+    product?.tipo ||
+    product?.type ||
+    "";
+
+  if (Array.isArray(rawValue)) {
+    return rawValue
+      .map((item) => getRelatedName(item))
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  return rawValue
+    .toString()
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function getProductType(product) {
-  return getRelatedName(product?.tipoProducto, product?.tipo, product?.type);
+  const tipos = normalizeTiposFromProduct(product);
+
+  return tipos.join(", ");
 }
 
 function getProductCategoryName(product) {
@@ -319,110 +345,6 @@ function normalizePersonajesFromProduct(product) {
     .filter(Boolean);
 }
 
-function MultiTextInput({
-  label,
-  values,
-  setValues,
-  options = [],
-  placeholder = "Escribe y agrega",
-  helperText = ""
-}) {
-  const [draft, setDraft] = useState("");
-
-  const availableOptions = useMemo(() => {
-    return options.filter(
-      (option) =>
-        !values.some((value) => normalizeText(value) === normalizeText(option))
-    );
-  }, [options, values]);
-
-  const addValue = (value) => {
-    const cleanValue = value.trim();
-
-    if (!cleanValue) return;
-
-    setValues((currentValues) => {
-      const exists = currentValues.some(
-        (item) => normalizeText(item) === normalizeText(cleanValue)
-      );
-
-      if (exists) return currentValues;
-
-      return [...currentValues, cleanValue];
-    });
-
-    setDraft("");
-  };
-
-  return (
-    <div className="rounded-[28px] bg-[#F8F6F7] p-5">
-      <p className="font-black">{label}</p>
-
-      {helperText && (
-        <p className="mt-1 text-sm text-gray-600 leading-6">{helperText}</p>
-      )}
-
-      <div className="mt-4 flex flex-col gap-3 md:flex-row">
-        <input
-          value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          className="w-full rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3 outline-none"
-          placeholder={placeholder}
-        />
-
-        <button
-          type="button"
-          onClick={() => addValue(draft)}
-          className="rounded-full bg-white px-5 py-3 text-sm font-black"
-        >
-          Agregar
-        </button>
-      </div>
-
-      {availableOptions.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {availableOptions.slice(0, 10).map((option) => (
-            <button
-              key={option}
-              type="button"
-              onClick={() => addValue(option)}
-              className="rounded-full bg-white px-3 py-1 text-xs font-black"
-            >
-              + {option}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {values.length > 0 && (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {values.map((value) => (
-            <span
-              key={value}
-              className="rounded-full bg-white px-4 py-2 text-sm font-black"
-            >
-              {value}
-              <button
-                type="button"
-                onClick={() =>
-                  setValues((currentValues) =>
-                    currentValues.filter(
-                      (item) => normalizeText(item) !== normalizeText(value)
-                    )
-                  )
-                }
-                className="ml-2 text-red-500"
-              >
-                ×
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function AdminProductsPage() {
   const {
     products,
@@ -444,7 +366,11 @@ function AdminProductsPage() {
     createOriginFull,
     refreshProducts,
     refreshCategories,
-    refreshOrigins
+    refreshOrigins,
+    createSeriesFull,
+    refreshSeries,
+    createEventFull,
+    refreshEvents
   } = useAdminData();
 
   const [view, setView] = useState("list");
@@ -495,18 +421,57 @@ function AdminProductsPage() {
   }, [origins]);
 
   const typeOptions = useMemo(() => {
-    return productTypes.map((type) => ({
-      id: type,
-      nombre: type
-    }));
-  }, []);
+    const tiposFromProducts = (products || [])
+      .flatMap((product) => normalizeTiposFromProduct(product))
+      .filter(Boolean);
+
+    const allTypes = [...baseProductTypes, ...tiposFromProducts];
+
+    const uniqueTypes = allTypes.reduce((accumulator, type) => {
+      const cleanType = type.trim();
+
+      if (!cleanType) return accumulator;
+
+      const alreadyExists = accumulator.some(
+        (item) => normalizeText(item) === normalizeText(cleanType)
+      );
+
+      if (!alreadyExists) accumulator.push(cleanType);
+
+      return accumulator;
+    }, []);
+
+    return uniqueTypes
+      .map((type) => ({
+        id: type,
+        nombre: type
+      }))
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [products]);
 
   const characterOptions = useMemo(() => {
+    const selectedSerie = normalizeText(form.serieNombre);
+
     return (characters || [])
       .filter((character) => character.activo !== false)
-      .map((character) => character.nombre)
-      .filter(Boolean);
-  }, [characters]);
+      .filter((character) => {
+        if (!selectedSerie) return true;
+
+        return (
+          normalizeText(character.serie || character.serieNombre || "") ===
+          selectedSerie
+        );
+      })
+      .map((character) => ({
+        ...character,
+        id: getId(character) || character.nombre,
+        nombre: character.nombre || character.name || "Personaje",
+        serie: character.serie || character.serieNombre || "",
+        needsReview: Boolean(character.needsReview)
+      }))
+      .filter((character) => character.nombre)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [characters, form.serieNombre]);
 
   const selectedAvailability = disponibilidadOptions.find(
     (option) => option.value === form.disponibilidad
@@ -548,6 +513,7 @@ function AdminProductsPage() {
       eventoNombre: getProductEventName(product),
       origenNombre: getProductOriginName(product),
       tipoProducto: getProductType(product),
+      tiposProducto: normalizeTiposFromProduct(product),
       personajesNombre: normalizePersonajesFromProduct(product),
       material: product.material || "",
       precio: getProductPrice(product),
@@ -663,12 +629,121 @@ function AdminProductsPage() {
     };
   };
 
+  const ensureSeriesExists = async (origin) => {
+    const seriesName = form.serieNombre.trim();
+
+    if (!seriesName) {
+      return {
+        id: "",
+        nombre: ""
+      };
+    }
+
+    const existingSeries = getOptionByName(seriesOptions, seriesName);
+
+    if (existingSeries) {
+      return {
+        id: existingSeries._id || existingSeries.id,
+        nombre: existingSeries.nombre
+      };
+    }
+
+    if (!createSeriesFull) {
+      return {
+        id: "",
+        nombre: seriesName
+      };
+    }
+
+    const createdSeries = await createSeriesFull({
+      nombre: seriesName,
+      descripcion: "Serie creada rápidamente desde productos.",
+      categoriaPrincipalNombre: form.categoriaNombre.trim() || "Series",
+      categoriaNombre: form.categoriaNombre.trim() || "Series",
+      origen: origin?.id || "",
+      origenNombre: origin?.nombre || form.origenNombre.trim() || "Variado",
+      pais: origin?.nombre || form.origenNombre.trim() || "V",
+      tipo: form.categoriaNombre.trim() || "Historia",
+      genero: "",
+      creadoresNombre: [],
+      destacada: false,
+      activa: true,
+      activo: true,
+      orden: 0
+    });
+
+    await refreshSeries?.();
+
+    return {
+      id: createdSeries._id || createdSeries.id,
+      nombre: createdSeries.nombre
+    };
+  };
+
+  const ensureEventExists = async ({ origin, serie }) => {
+    const eventName = form.eventoNombre.trim();
+
+    if (!eventName) {
+      return {
+        id: "",
+        nombre: ""
+      };
+    }
+
+    const existingEvent = getOptionByName(eventOptions, eventName);
+
+    if (existingEvent) {
+      return {
+        id: existingEvent._id || existingEvent.id,
+        nombre: existingEvent.nombre
+      };
+    }
+
+    if (!createEventFull) {
+      return {
+        id: "",
+        nombre: eventName
+      };
+    }
+
+    const createdEvent = await createEventFull({
+      titulo: eventName,
+      nombre: eventName,
+      descripcion: "Evento creado rápidamente desde productos.",
+      categoriaNombre: "Eventos",
+      origen: origin?.id || "",
+      origenNombre: origin?.nombre || form.origenNombre.trim() || "Variado",
+      pais: origin?.nombre || form.origenNombre.trim() || "V",
+      tipoEvento: "Otro",
+      fechaInicio: null,
+      fechaFin: null,
+      estado: "proximo",
+      destacado: false,
+      activo: true,
+      series: serie?.id ? [serie.id] : [],
+      seriesNombre: serie?.nombre ? [serie.nombre] : [],
+      productos: []
+    });
+
+    await refreshEvents?.();
+
+    return {
+      id: createdEvent._id || createdEvent.id,
+      nombre: createdEvent.titulo || createdEvent.nombre || eventName
+    };
+  };
+
   const buildPayload = async () => {
     const category = await ensureCategoryExists();
     const origin = await ensureOriginExists();
+    const serie = await ensureSeriesExists(origin);
+    const event = await ensureEventExists({ origin, serie });
 
-    const selectedSerie = getOptionByName(seriesOptions, form.serieNombre);
-    const selectedEvent = getOptionByName(eventOptions, form.eventoNombre);
+    const tiposProducto = Array.isArray(form.tiposProducto)
+      ? form.tiposProducto.map((item) => item.trim()).filter(Boolean)
+      : [];
+
+    const tiposProductoTexto = tiposProducto.join(", ");
 
     const payload = {
       nombre: form.nombre.trim(),
@@ -678,20 +753,21 @@ function AdminProductsPage() {
       categoria: category.id,
       categoriaNombre: category.nombre,
 
-      serieId: selectedSerie ? selectedSerie._id || selectedSerie.id : "",
-      serie: selectedSerie ? selectedSerie._id || selectedSerie.id : form.serieNombre.trim(),
-      serieNombre: form.serieNombre.trim(),
+      serieId: serie.id,
+      serie: serie.id || serie.nombre,
+      serieNombre: serie.nombre || form.serieNombre.trim(),
 
-      eventoId: selectedEvent ? selectedEvent._id || selectedEvent.id : "",
-      evento: selectedEvent ? selectedEvent._id || selectedEvent.id : form.eventoNombre.trim(),
-      eventoNombre: form.eventoNombre.trim(),
+      eventoId: event.id,
+      evento: event.id || event.nombre,
+      eventoNombre: event.nombre || form.eventoNombre.trim(),
 
       origen: origin.id || form.origenNombre.trim(),
       origenNombre: origin.nombre,
       pais: origin.nombre,
 
-      tipo: form.tipoProducto.trim(),
-      tipoProducto: form.tipoProducto.trim(),
+      tipo: tiposProductoTexto,
+      tipoProducto: tiposProductoTexto,
+      tiposProducto,
 
       personajesNombre: form.personajesNombre,
       personajeNombre: form.personajesNombre.join(", "),
@@ -732,8 +808,8 @@ function AdminProductsPage() {
       return;
     }
 
-    if (!form.tipoProducto.trim()) {
-      setMessage("Escribe o selecciona el tipo de producto.");
+    if (!Array.isArray(form.tiposProducto) || form.tiposProducto.length === 0) {
+      setMessage("Selecciona o crea al menos un tipo de producto.");
       return;
     }
 
@@ -826,8 +902,8 @@ function AdminProductsPage() {
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
               Crea y edita productos sin romper imágenes existentes. Si solo
-              cambias evento, serie, categoría, precio, stock u origen, las
-              imágenes se conservan tal como estaban.
+              cambias evento, series, categoría, tipos de producto, precio,
+              stock u origen, las imágenes se conservan tal como estaban.
             </p>
           </div>
 
@@ -870,9 +946,17 @@ function AdminProductsPage() {
         </div>
       </div>
 
-      {(message || storageError || productLoadError || categoriesLoadError || originsLoadError) && (
+      {(message ||
+        storageError ||
+        productLoadError ||
+        categoriesLoadError ||
+        originsLoadError) && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
-          {message || storageError || productLoadError || categoriesLoadError || originsLoadError}
+          {message ||
+            storageError ||
+            productLoadError ||
+            categoriesLoadError ||
+            originsLoadError}
         </div>
       )}
 
@@ -946,7 +1030,7 @@ function AdminProductsPage() {
               placeholder="Buscar o escribir categoría"
               emptyLabel="Sin categoría"
               emptyCreateLabel="Agregar categoría"
-              createLabel={(name) => `Agregar categoría “${name}”`}
+              createLabel={(name) => `Agregar “${name}” a categorías`}
               helperText="Si no existe, se creará y se guardará en MongoDB al guardar el producto."
             />
 
@@ -963,8 +1047,9 @@ function AdminProductsPage() {
               options={seriesOptions}
               placeholder="Buscar o escribir serie"
               emptyLabel="Sin serie"
-              emptyCreateLabel="Agregar serie como texto"
-              createLabel={(name) => `Usar serie “${name}”`}
+              emptyCreateLabel="Agregar serie"
+              createLabel={(name) => `Agregar “${name}” a series`}
+              helperText="Si no existe, se creará y quedará guardada en MongoDB al guardar el producto."
             />
 
             <CreatableSelect
@@ -980,8 +1065,9 @@ function AdminProductsPage() {
               options={eventOptions}
               placeholder="Buscar o escribir evento"
               emptyLabel="Sin evento"
-              emptyCreateLabel="Agregar evento como texto"
-              createLabel={(name) => `Usar evento “${name}”`}
+              emptyCreateLabel="Agregar evento"
+              createLabel={(name) => `Agregar “${name}” a eventos`}
+              helperText="Si no existe, se creará y quedará guardado en MongoDB al guardar el producto. El evento podrá vincularse a muchas series."
             />
 
             <CreatableSelect
@@ -998,25 +1084,27 @@ function AdminProductsPage() {
               placeholder="China, Corea, Japón, Variado..."
               emptyLabel="Sin origen"
               emptyCreateLabel="Agregar origen"
-              createLabel={(name) => `Agregar origen “${name}”`}
+              createLabel={(name) => `Agregar “${name}” a países/orígenes`}
               helperText="Si no existe, se creará y quedará guardado en MongoDB."
             />
 
-            <CreatableSelect
-              label="Tipo de producto"
-              value={form.tipoProducto}
-              onChange={(value) =>
+            <MultiCreatableSelect
+              label="Tipos de producto"
+              values={form.tiposProducto}
+              onChange={(values) =>
                 setForm((currentForm) => ({
                   ...currentForm,
-                  tipoProducto: value
+                  tiposProducto: values,
+                  tipoProducto: values.join(", ")
                 }))
               }
               onCreate={handleSimpleCreatableCreate}
               options={typeOptions}
               placeholder="Stand, llavero, photocard..."
-              emptyLabel="Sin tipo"
-              emptyCreateLabel="Agregar tipo"
-              createLabel={(name) => `Usar tipo “${name}”`}
+              emptyLabel="Sin tipos de producto"
+              emptyCreateLabel="Agregar tipo de producto"
+              createLabel={(name) => `Agregar “${name}” a tipo de producto`}
+              helperText="Un producto puede tener uno o más tipos de producto. Ejemplo: stand de acrílico y llavero."
             />
 
             <label className="grid gap-2 text-sm font-black">
@@ -1140,21 +1228,31 @@ function AdminProductsPage() {
             </div>
 
             <div className="lg:col-span-2">
-              <MultiTextInput
+              <MultiCreatableSelect
                 label="Personajes / criaturas"
                 values={form.personajesNombre}
-                setValues={(updater) =>
+                onChange={(values) =>
                   setForm((currentForm) => ({
                     ...currentForm,
-                    personajesNombre:
-                      typeof updater === "function"
-                        ? updater(currentForm.personajesNombre)
-                        : updater
+                    personajesNombre: values
                   }))
+                }
+                onCreate={(name) =>
+                  createCharacterQuick({
+                    name,
+                    serie: form.serieNombre.trim()
+                  })
                 }
                 options={characterOptions}
                 placeholder="Ejemplo: Shuraka"
-                helperText="Si escribes un personaje que no existe, se creará como faltan detalles."
+                emptyLabel="Sin personajes"
+                emptyCreateLabel="Agregar personaje"
+                disabled={!form.serieNombre.trim()}
+                disabledText="Selecciona primero una serie para agregar personajes."
+                createLabel={(name) =>
+                  `Agregar “${name}” a personajes de “${form.serieNombre.trim()}”`
+                }
+                helperText="Primero selecciona la serie. Si escribes un personaje que no existe, se creará asociado a esa serie y marcado como faltan detalles."
               />
             </div>
 
@@ -1274,7 +1372,7 @@ function AdminProductsPage() {
                         </p>
 
                         <p>
-                          <strong>Tipo:</strong>{" "}
+                          <strong>Tipo de producto:</strong>{" "}
                           {getProductType(product) || "Sin tipo"}
                         </p>
 

@@ -1,9 +1,34 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, Plus, Search, X } from "lucide-react";
+import { Check, ChevronDown, Loader2, Plus, Search, X } from "lucide-react";
+
+function normalizeText(text = "") {
+  return text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
 
 function normalizeArray(value) {
   if (!Array.isArray(value)) return [];
   return value.filter(Boolean);
+}
+
+function getOptionName(option) {
+  if (!option) return "";
+
+  if (typeof option === "string") return option;
+
+  return option.nombre || option.titulo || option.name || "";
+}
+
+function getOptionId(option) {
+  if (!option) return "";
+
+  if (typeof option === "string") return option;
+
+  return option._id || option.id || option.value || getOptionName(option);
 }
 
 function MultiCreatableSelect({
@@ -20,46 +45,61 @@ function MultiCreatableSelect({
   createLabel,
   emptyCreateLabel = "Agregar nuevo",
   secondaryCreateLabel,
-  onSecondaryCreate
+  onSecondaryCreate,
+  createTargetLabel = "",
+  createContextLabel = ""
 }) {
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
 
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [creating, setCreating] = useState(false);
 
   const selectedValues = normalizeArray(values);
   const cleanSearch = search.trim();
 
+  const normalizedOptions = useMemo(() => {
+    return options
+      .map((option) => ({
+        ...((typeof option === "object" && option !== null) ? option : {}),
+        id: getOptionId(option),
+        nombre: getOptionName(option)
+      }))
+      .filter((option) => option.nombre);
+  }, [options]);
+
   const selectedSet = useMemo(() => {
-    return new Set(selectedValues.map((value) => value.toLowerCase()));
+    return new Set(selectedValues.map((value) => normalizeText(value)));
   }, [selectedValues]);
 
   const filteredOptions = useMemo(() => {
-    const loweredSearch = cleanSearch.toLowerCase();
+    const loweredSearch = normalizeText(cleanSearch);
 
-    return options.filter((option) => {
+    return normalizedOptions.filter((option) => {
       const optionName = option.nombre || "";
 
       if (!optionName) return false;
 
-      if (selectedSet.has(optionName.toLowerCase())) return false;
+      if (selectedSet.has(normalizeText(optionName))) return false;
 
       if (!loweredSearch) return true;
 
-      return optionName.toLowerCase().includes(loweredSearch);
+      return normalizeText(optionName).includes(loweredSearch);
     });
-  }, [options, cleanSearch, selectedSet]);
+  }, [normalizedOptions, cleanSearch, selectedSet]);
 
-  const exactExists = options.some(
-    (option) => option.nombre?.toLowerCase() === cleanSearch.toLowerCase()
+  const exactExists = normalizedOptions.some(
+    (option) => normalizeText(option.nombre) === normalizeText(cleanSearch)
   );
 
   const selectedExactExists = selectedValues.some(
-    (value) => value.toLowerCase() === cleanSearch.toLowerCase()
+    (value) => normalizeText(value) === normalizeText(cleanSearch)
   );
 
-  const canCreate = cleanSearch && !exactExists && !selectedExactExists && !disabled;
+  const canCreate = Boolean(
+    cleanSearch && !exactExists && !selectedExactExists && !disabled
+  );
 
   const closeMenu = () => {
     setOpen(false);
@@ -79,7 +119,7 @@ function MultiCreatableSelect({
     if (!value) return;
 
     const alreadySelected = selectedValues.some(
-      (item) => item.toLowerCase() === value.toLowerCase()
+      (item) => normalizeText(item) === normalizeText(value)
     );
 
     if (alreadySelected) return;
@@ -97,32 +137,68 @@ function MultiCreatableSelect({
     closeMenu();
   };
 
-  const handleCreate = () => {
-    if (!canCreate) return;
+  const resolveCreatedName = (createdOption, fallbackName) => {
+    if (!createdOption) return fallbackName;
 
-    const createdOption = onCreate(cleanSearch);
+    if (typeof createdOption === "string") return createdOption;
 
-    if (createdOption?.nombre) {
-      addValue(createdOption.nombre);
-    } else {
-      addValue(cleanSearch);
-    }
-
-    closeMenu();
+    return (
+      createdOption.nombre ||
+      createdOption.titulo ||
+      createdOption.name ||
+      fallbackName
+    );
   };
 
-  const handleSecondaryCreate = () => {
-    if (!canCreate || !onSecondaryCreate) return;
+  const handleCreate = async () => {
+    if (!canCreate || creating) return;
 
-    const createdOption = onSecondaryCreate(cleanSearch);
+    setCreating(true);
 
-    if (createdOption?.nombre) {
-      addValue(createdOption.nombre);
-    } else {
-      addValue(cleanSearch);
+    try {
+      let createdOption = null;
+
+      if (onCreate) {
+        createdOption = await onCreate(cleanSearch);
+      }
+
+      const createdName = resolveCreatedName(createdOption, cleanSearch);
+
+      addValue(createdName);
+      closeMenu();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleSecondaryCreate = async () => {
+    if (!canCreate || !onSecondaryCreate || creating) return;
+
+    setCreating(true);
+
+    try {
+      const createdOption = await onSecondaryCreate(cleanSearch);
+      const createdName = resolveCreatedName(createdOption, cleanSearch);
+
+      addValue(createdName);
+      closeMenu();
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const getCreateLabelText = (name) => {
+    if (createLabel) return createLabel(name);
+
+    if (createTargetLabel && createContextLabel) {
+      return `Agregar “${name}” a ${createTargetLabel} de “${createContextLabel}”`;
     }
 
-    closeMenu();
+    if (createTargetLabel) {
+      return `Agregar “${name}” a ${createTargetLabel}`;
+    }
+
+    return `Agregar “${name}”`;
   };
 
   useEffect(() => {
@@ -270,7 +346,7 @@ function MultiCreatableSelect({
 
             {!cleanSearch && filteredOptions.length === 0 && (
               <div className="rounded-2xl bg-[#F8F6F7] px-4 py-3 text-sm font-bold text-gray-500">
-                No hay más personajes disponibles para seleccionar.
+                No hay más opciones disponibles para seleccionar.
               </div>
             )}
 
@@ -285,14 +361,25 @@ function MultiCreatableSelect({
               </button>
             )}
 
+            {cleanSearch && filteredOptions.length === 0 && !canCreate && (
+              <div className="rounded-2xl bg-[#F8F6F7] px-4 py-3 text-sm font-bold text-gray-500">
+                No hay coincidencias.
+              </div>
+            )}
+
             {canCreate && (
               <button
                 type="button"
                 onClick={handleCreate}
-                className="mt-2 flex items-center gap-2 rounded-2xl bg-[#87CCC8] px-4 py-3 text-left text-sm font-black text-white"
+                disabled={creating}
+                className="mt-2 flex items-center gap-2 rounded-2xl bg-[#87CCC8] px-4 py-3 text-left text-sm font-black text-white disabled:opacity-60"
               >
-                <Plus size={17} />
-                {createLabel ? createLabel(cleanSearch) : `Agregar “${cleanSearch}”`}
+                {creating ? (
+                  <Loader2 size={17} className="animate-spin" />
+                ) : (
+                  <Plus size={17} />
+                )}
+                {getCreateLabelText(cleanSearch)}
               </button>
             )}
 
@@ -300,18 +387,24 @@ function MultiCreatableSelect({
               <button
                 type="button"
                 onClick={handleSecondaryCreate}
-                className="flex items-center gap-2 rounded-2xl bg-[#F7D9D8] px-4 py-3 text-left text-sm font-black"
+                disabled={creating}
+                className="flex items-center gap-2 rounded-2xl bg-[#F7D9D8] px-4 py-3 text-left text-sm font-black disabled:opacity-60"
               >
-                <Plus size={17} />
+                {creating ? (
+                  <Loader2 size={17} className="animate-spin" />
+                ) : (
+                  <Plus size={17} />
+                )}
+
                 {secondaryCreateLabel
                   ? secondaryCreateLabel(cleanSearch)
-                  : `Agregar personaje “${cleanSearch}”`}
+                  : `Agregar “${cleanSearch}”`}
               </button>
             )}
 
             {cleanSearch && (exactExists || selectedExactExists) && (
               <div className="mt-2 rounded-2xl bg-[#F8F6F7] px-4 py-3 text-sm font-bold text-gray-500">
-                Ese personaje ya existe o ya fue seleccionado.
+                Ese registro ya existe o ya fue seleccionado.
               </div>
             )}
           </div>
