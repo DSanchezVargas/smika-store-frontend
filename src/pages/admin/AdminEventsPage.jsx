@@ -40,6 +40,10 @@ const eventStatusOptions = [
     label: "Próximo"
   },
   {
+    value: "preventa",
+    label: "Preventa"
+  },
+  {
     value: "activo",
     label: "Activo"
   },
@@ -53,15 +57,7 @@ const eventStatusOptions = [
   }
 ];
 
-const eventTypeOptions = [
-  "Café evento",
-  "Pop up",
-  "Feria",
-  "Preventa",
-  "Lanzamiento",
-  "Colaboración",
-  "Otro"
-];
+const eventTypeOptions = ["Lebom", "Café", "Fantazit", "Otro"];
 
 function getId(item) {
   return item?._id || item?.id || "";
@@ -221,21 +217,27 @@ function getCountryCodeFromOrigin(originName = "") {
   return originName.trim() || "V";
 }
 
-function uniqueTextOptions(values = []) {
+function buildUniqueOptions(items = []) {
   const map = new Map();
 
-  values
-    .map((value) => value?.toString().trim())
-    .filter(Boolean)
-    .forEach((value) => {
-      const key = normalizeText(value);
+  items.forEach((item) => {
+    const id = item.id || item.value || "";
+    const label = item.label || "";
 
-      if (!map.has(key)) {
-        map.set(key, value);
-      }
-    });
+    if (!label) return;
 
-  return [...map.values()].sort((a, b) => a.localeCompare(b));
+    const key = normalizeText(label);
+
+    if (!map.has(key)) {
+      map.set(key, {
+        id,
+        label,
+        value: id || label
+      });
+    }
+  });
+
+  return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
 }
 
 function EventMultiSelect({
@@ -254,7 +256,9 @@ function EventMultiSelect({
 
     if (!cleanSearch) return options;
 
-    return options.filter((item) => normalizeText(getLabel(item)).includes(cleanSearch));
+    return options.filter((item) =>
+      normalizeText(getLabel(item)).includes(cleanSearch)
+    );
   }, [options, search, getLabel]);
 
   const toggleOption = (id) => {
@@ -384,22 +388,40 @@ function AdminEventsPage() {
   }, [origins]);
 
   const categoryOptions = useMemo(() => {
-    return uniqueTextOptions([
-      "Eventos",
-      "Café evento",
-      "Pop up",
-      "Feria",
-      ...activeCategories.map((category) => category.nombre)
+    return buildUniqueOptions([
+      {
+        id: "",
+        label: "Eventos"
+      },
+      ...activeCategories.map((category) => ({
+        id: getId(category),
+        label: category.nombre
+      }))
     ]);
   }, [activeCategories]);
 
   const originOptions = useMemo(() => {
-    return uniqueTextOptions([
-      "China",
-      "Corea",
-      "Japón",
-      "Variado",
-      ...activeOrigins.map((origin) => origin.nombre)
+    return buildUniqueOptions([
+      {
+        id: "",
+        label: "China"
+      },
+      {
+        id: "",
+        label: "Corea"
+      },
+      {
+        id: "",
+        label: "Japón"
+      },
+      {
+        id: "",
+        label: "Variado"
+      },
+      ...activeOrigins.map((origin) => ({
+        id: getId(origin),
+        label: origin.nombre
+      }))
     ]);
   }, [activeOrigins]);
 
@@ -461,20 +483,26 @@ function AdminEventsPage() {
       ? event.imagenes.map(getImageSource).filter(Boolean)
       : [];
 
+    const categoryId =
+      typeof event.categoria === "string" &&
+      activeCategories.some((category) => getId(category) === event.categoria)
+        ? event.categoria
+        : "";
+
+    const originId =
+      typeof event.origen === "string" &&
+      activeOrigins.some((origin) => getId(origin) === event.origen)
+        ? event.origen
+        : "";
+
     setEditingEvent(event);
 
     setForm({
       titulo: event.titulo || event.nombre || "",
       descripcion: event.descripcion || "",
-      categoria:
-        typeof event.categoria === "string" && event.categoria !== event.categoriaNombre
-          ? event.categoria
-          : "",
+      categoria: categoryId,
       categoriaNombre: event.categoriaNombre || "Eventos",
-      origen:
-        typeof event.origen === "string" && event.origen !== event.origenNombre
-          ? event.origen
-          : "",
+      origen: originId,
       origenNombre: event.origenNombre || "Variado",
       pais: event.pais || getCountryCodeFromOrigin(event.origenNombre || "Variado"),
       tipoEvento: event.tipoEvento || event.tipo || "Otro",
@@ -805,20 +833,18 @@ function AdminEventsPage() {
 
             <label className="grid gap-2 text-sm font-black">
               Tipo de evento
-              <input
+              <select
                 name="tipoEvento"
-                list="event-type-options"
                 value={form.tipoEvento}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Café evento, feria, pop up..."
-              />
-
-              <datalist id="event-type-options">
+              >
                 {eventTypeOptions.map((option) => (
-                  <option key={option} value={option} />
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
                 ))}
-              </datalist>
+              </select>
             </label>
 
             <label className="grid gap-2 text-sm font-black">
@@ -829,14 +855,8 @@ function AdminEventsPage() {
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
               >
                 {categoryOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-
-                {activeCategories.map((category) => (
-                  <option key={getId(category)} value={getId(category)}>
-                    {category.nombre}
+                  <option key={`${option.value}-${option.label}`} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
@@ -850,14 +870,8 @@ function AdminEventsPage() {
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
               >
                 {originOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-
-                {activeOrigins.map((origin) => (
-                  <option key={getId(origin)} value={getId(origin)}>
-                    {origin.nombre}
+                  <option key={`${option.value}-${option.label}`} value={option.value}>
+                    {option.label}
                   </option>
                 ))}
               </select>
