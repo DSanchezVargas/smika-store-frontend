@@ -53,6 +53,17 @@ const AdminDataContext = createContext(null);
 
 const STORAGE_KEY = "smika_admin_data_v1";
 
+const defaultAdminData = {
+  products: [],
+  events: [],
+  series: [],
+  characters: [],
+  categories: [],
+  creators: [],
+  origins: [],
+  users: []
+};
+
 function createSlug(text = "") {
   return text
     .toString()
@@ -64,26 +75,29 @@ function createSlug(text = "") {
     .replace(/(^-|-$)+/g, "");
 }
 
+function normalizeText(text = "") {
+  return text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
 function isMongoObjectId(value) {
   return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
 }
 
 function getId(item) {
-  return item?._id || item?.id || "";
+  if (!item) return "";
+  if (typeof item === "string") return item;
+  return item._id || item.id || "";
 }
 
-function getTextValue(...values) {
-  const found = values.find(
-    (value) => value !== undefined && value !== null && value !== ""
-  );
-
-  if (Array.isArray(found)) return found.join(", ").trim();
-
-  if (found && typeof found === "object") {
-    return found.nombre || found.titulo || found.name || "";
-  }
-
-  return found ? found.toString().trim() : "";
+function getName(item, fallback = "") {
+  if (!item) return fallback || "";
+  if (typeof item === "string") return item;
+  return item.nombre || item.titulo || item.name || fallback || "";
 }
 
 function getRelatedName(value, fallback = "") {
@@ -115,6 +129,43 @@ function getImageSource(image) {
   return "";
 }
 
+function normalizeArrayText(value) {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => normalizeArrayText(item))
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (value && typeof value === "object") {
+    return [getName(value)].filter(Boolean);
+  }
+
+  if (!value) return [];
+
+  return value
+    .toString()
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function uniqueText(values = []) {
+  return values.reduce((accumulator, value) => {
+    const cleanValue = value?.toString().trim();
+
+    if (!cleanValue) return accumulator;
+
+    const exists = accumulator.some(
+      (item) => normalizeText(item) === normalizeText(cleanValue)
+    );
+
+    if (!exists) accumulator.push(cleanValue);
+
+    return accumulator;
+  }, []);
+}
+
 function normalizeImageList(images = []) {
   if (!Array.isArray(images)) return [];
 
@@ -130,19 +181,15 @@ function normalizeImageList(images = []) {
     });
 }
 
-function normalizeArrayText(value) {
-  if (Array.isArray(value)) {
-    return value.map((item) => getTextValue(item)).filter(Boolean);
-  }
+function shouldSendImages(payload = {}, includeImages = false) {
+  if (includeImages) return true;
 
-  const text = getTextValue(value);
-
-  if (!text) return [];
-
-  return text
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
+  return (
+    payload.imagenesTouched === true ||
+    payload.imagesTouched === true ||
+    payload.replaceImages === true ||
+    payload.reemplazarImagenes === true
+  );
 }
 
 function normalizeEstadoToDisponibilidad(estado = "") {
@@ -155,15 +202,25 @@ function normalizeEstadoToDisponibilidad(estado = "") {
   return "stock";
 }
 
-function shouldSendImages(payload = {}, includeImages = false) {
-  if (includeImages) return true;
+function pickList(data, keys = []) {
+  for (const key of keys) {
+    if (Array.isArray(data?.[key])) return data[key];
+  }
 
-  return (
-    payload.imagenesTouched === true ||
-    payload.imagesTouched === true ||
-    payload.replaceImages === true ||
-    payload.reemplazarImagenes === true
-  );
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data)) return data;
+
+  return [];
+}
+
+function pickOne(data, keys = []) {
+  for (const key of keys) {
+    if (data?.[key]) return data[key];
+  }
+
+  if (data?.data && !Array.isArray(data.data)) return data.data;
+
+  return data || {};
 }
 
 function normalizeCategoryFromApi(category = {}) {
@@ -183,7 +240,7 @@ function normalizeCategoryFromApi(category = {}) {
     imagen: category.imagen || "",
     orden: Number(category.orden || 0),
     activa: category.activa !== false,
-    activo: category.activa !== false
+    activo: category.activo !== false && category.activa !== false
   };
 }
 
@@ -198,7 +255,7 @@ function normalizeCreatorFromApi(creator = {}) {
     slug: creator.slug || createSlug(creator.nombre || mongoId),
     tipo: creator.tipo || "Autor",
     descripcion: creator.descripcion || "",
-    paisOrigen: creator.paisOrigen || "",
+    paisOrigen: creator.paisOrigen || creator.origenNombre || "",
     activo: creator.activo !== false
   };
 }
@@ -217,17 +274,48 @@ function normalizeOriginFromApi(origin = {}) {
   };
 }
 
+function normalizeCharacterFromApi(character = {}) {
+  const mongoId = getId(character);
+
+  const serieNombre = getRelatedName(
+    character.serie,
+    character.serieNombre || character.seriesNombre || character.series || ""
+  );
+
+  const serieId =
+    typeof character.serie === "string" && isMongoObjectId(character.serie)
+      ? character.serie
+      : getId(character.serie);
+
+  return {
+    ...character,
+    id: mongoId,
+    _id: mongoId,
+    nombre: character.nombre || character.name || "Personaje",
+    slug: character.slug || createSlug(character.nombre || mongoId),
+    descripcion: character.descripcion || "",
+    serie: serieNombre,
+    serieId,
+    serieNombre,
+    estado: character.estado || "",
+    needsReview:
+      character.needsReview === true ||
+      normalizeText(character.estado).includes("faltan detalles"),
+    activo: character.activo !== false
+  };
+}
+
 function normalizeProductFromApi(product = {}) {
   const mongoId = getId(product);
 
   const serieNombre = getRelatedName(
     product.serie,
-    product.serieNombre || product.series || ""
+    product.serieNombre || product.seriesNombre || product.series || ""
   );
 
   const eventoNombre = getRelatedName(
     product.evento,
-    product.eventoNombre || product.event || ""
+    product.eventoNombre || product.event || product.eventName || ""
   );
 
   const categoriaNombre = getRelatedName(
@@ -248,6 +336,21 @@ function normalizeProductFromApi(product = {}) {
   const precio = Number(
     product.precioReferencial ?? product.precio ?? product.price ?? 0
   );
+
+  const tiposProducto = uniqueText([
+    ...normalizeArrayText(product.tiposProducto),
+    ...normalizeArrayText(product.tipoProducto),
+    ...normalizeArrayText(product.tipo),
+    ...normalizeArrayText(product.type),
+    ...normalizeArrayText(product.typeProduct)
+  ]);
+
+  const personajesNombre = uniqueText([
+    ...normalizeArrayText(product.personajesNombre),
+    ...normalizeArrayText(product.personajeNombre),
+    ...normalizeArrayText(product.personaje),
+    ...normalizeArrayText(product.personajes)
+  ]);
 
   return {
     ...product,
@@ -270,20 +373,15 @@ function normalizeProductFromApi(product = {}) {
 
     origen: origenNombre,
     origenNombre,
+    pais: product.pais || origenNombre,
 
-    tipo: product.tipoProducto || product.tipo || product.type || "Producto",
-    tipoProducto:
-      product.tipoProducto || product.tipo || product.type || "Producto",
+    tipo: tiposProducto.join(", ") || "Producto",
+    tipoProducto: tiposProducto.join(", ") || "Producto",
+    tiposProducto,
 
-    personaje:
-      product.personajeNombre ||
-      product.personaje ||
-      product.personajesNombre?.[0] ||
-      "",
-
-    personajesNombre: Array.isArray(product.personajesNombre)
-      ? product.personajesNombre
-      : [],
+    personaje: personajesNombre[0] || "",
+    personajeNombre: personajesNombre.join(", "),
+    personajesNombre,
 
     precio,
     price: precio,
@@ -296,6 +394,14 @@ function normalizeProductFromApi(product = {}) {
     disponibilidad:
       product.disponibilidad ||
       normalizeEstadoToDisponibilidad(product.estado || "Activo"),
+
+    adulto: Boolean(product.adulto),
+    esNuevo:
+      product.esNuevo !== undefined ? Boolean(product.esNuevo) : Boolean(product.nuevo),
+    esDestacado:
+      product.esDestacado !== undefined
+        ? Boolean(product.esDestacado)
+        : Boolean(product.destacado),
 
     activo: product.activo !== false,
     imagenes: Array.isArray(product.imagenes) ? product.imagenes : []
@@ -323,9 +429,11 @@ function normalizeSeriesFromApi(serie = {}) {
     getRelatedName(serie.origen, serie.origenNombre || serie.pais || "Variado") ||
     "Variado";
 
-  const creadoresNombre = Array.isArray(serie.creadoresNombre)
-    ? serie.creadoresNombre.filter(Boolean)
-    : normalizeArrayText(serie.autor);
+  const creadoresNombre = uniqueText([
+    ...normalizeArrayText(serie.creadoresNombre),
+    ...normalizeArrayText(serie.autor),
+    ...normalizeArrayText(serie.creadores)
+  ]);
 
   return {
     ...serie,
@@ -351,7 +459,7 @@ function normalizeSeriesFromApi(serie = {}) {
     origen: origenNombre,
     origenNombre,
 
-    pais: serie.pais || "V",
+    pais: serie.pais || origenNombre || "V",
     tipo: serie.tipo || categoriaNombre || "Historia",
     genero: serie.genero || "",
 
@@ -376,14 +484,12 @@ function normalizeEventFromApi(event = {}) {
     (image) => image !== coverImage
   );
 
-  const seriesNombre = Array.isArray(event.seriesNombre)
-    ? event.seriesNombre.filter(Boolean)
-    : [
-        getRelatedName(event.serie, event.serieNombre || ""),
-        event.serieNombre
-      ].filter(Boolean);
-
-  const uniqueSeriesNombre = [...new Set(seriesNombre)];
+  const seriesNombre = uniqueText([
+    ...normalizeArrayText(event.seriesNombre),
+    ...normalizeArrayText(event.serieNombre),
+    ...normalizeArrayText(event.series),
+    ...normalizeArrayText(event.serie)
+  ]);
 
   const seriesIds = Array.isArray(event.series)
     ? event.series
@@ -399,9 +505,10 @@ function normalizeEventFromApi(event = {}) {
       ? event.serie
       : getId(event.serie);
 
-  const finalSeriesIds = [
-    ...new Set([legacySerieId, ...seriesIds].filter(isMongoObjectId))
-  ];
+  const finalSeriesIds = uniqueText([
+    legacySerieId,
+    ...seriesIds
+  ]).filter(isMongoObjectId);
 
   const categoriaNombre =
     getRelatedName(event.categoria, event.categoriaNombre || "Eventos") ||
@@ -429,16 +536,15 @@ function normalizeEventFromApi(event = {}) {
     categoria: categoriaNombre,
     categoriaNombre,
 
-    serie: uniqueSeriesNombre[0] || "",
-    serieNombre: uniqueSeriesNombre[0] || "",
-
+    serie: seriesNombre[0] || "",
+    serieNombre: seriesNombre[0] || "",
     series: finalSeriesIds,
-    seriesNombre: uniqueSeriesNombre,
+    seriesNombre,
 
     origen: origenNombre,
     origenNombre,
 
-    pais: event.pais || "V",
+    pais: event.pais || origenNombre || "V",
     tipo: event.tipo || event.tipoEvento || "Otro",
     tipoEvento: event.tipoEvento || event.tipo || "Otro",
 
@@ -454,41 +560,9 @@ function normalizeEventFromApi(event = {}) {
   };
 }
 
-function normalizeCharacterFromApi(character = {}) {
-  const mongoId = getId(character);
-
-  const serieNombre = getRelatedName(
-    character.serie,
-    character.serieNombre || character.serieTexto || "Sin serie definida"
-  );
-
-  return {
-    ...character,
-
-    id: mongoId,
-    _id: mongoId,
-
-    nombre: character.nombre || character.name || "Personaje Smika",
-    slug: character.slug || createSlug(character.nombre || mongoId),
-
-    tipo: character.tipo || "Personaje",
-    descripcion: character.descripcion || "",
-    imagen: character.imagen || "",
-
-    serie: serieNombre,
-    serieNombre,
-
-    estado:
-      character.estado || (character.needsReview ? "Faltan detalles" : "Completo"),
-    needsReview: Boolean(character.needsReview),
-
-    activo: character.activo !== false
-  };
-}
-
 function buildCategoryPayloadForApi(payload = {}) {
   return {
-    nombre: payload.nombre || "",
+    nombre: payload.nombre || payload.name || "",
     descripcion: payload.descripcion || "",
     tipo: payload.tipo || "principal",
     categoriaPadre: isMongoObjectId(payload.categoriaPadre)
@@ -510,121 +584,119 @@ function buildCategoryPayloadForApi(payload = {}) {
 
 function buildCreatorPayloadForApi(payload = {}) {
   return {
-    nombre: payload.nombre || "",
+    nombre: payload.nombre || payload.name || "",
     tipo: payload.tipo || "Autor",
     descripcion: payload.descripcion || "",
-    paisOrigen: payload.paisOrigen || "",
-    activo:
-      payload.activo !== undefined
-        ? Boolean(payload.activo)
-        : true
+    paisOrigen: payload.paisOrigen || payload.origenNombre || "",
+    activo: payload.activo !== undefined ? Boolean(payload.activo) : true
   };
 }
 
 function buildOriginPayloadForApi(payload = {}) {
   return {
-    nombre: payload.nombre || "",
+    nombre: payload.nombre || payload.name || "",
     descripcion: payload.descripcion || "",
-    activo:
-      payload.activo !== undefined
-        ? Boolean(payload.activo)
-        : true
+    activo: payload.activo !== undefined ? Boolean(payload.activo) : true
+  };
+}
+
+function buildCharacterPayloadForApi(payload = {}) {
+  const serieValue = payload.serie || payload.serieId || "";
+  const serieNombre = payload.serieNombre || payload.serie || "";
+
+  return {
+    nombre: payload.nombre || payload.name || "",
+    descripcion: payload.descripcion || "",
+    serie: isMongoObjectId(serieValue) ? serieValue : "",
+    serieNombre: isMongoObjectId(serieValue) ? serieNombre : serieNombre,
+    estado: payload.estado || "",
+    needsReview: Boolean(payload.needsReview),
+    activo: payload.activo !== undefined ? Boolean(payload.activo) : true
   };
 }
 
 function buildProductPayloadForApi(payload = {}, options = {}) {
-  const precio = Number(
-    payload.precioReferencial ?? payload.precio ?? payload.price ?? 0
-  );
+  const categoryValue = payload.categoria || payload.categoriaId || "";
+  const serieValue = payload.serie || payload.serieId || "";
+  const eventValue = payload.evento || payload.eventoId || "";
+  const originValue = payload.origen || payload.origenId || "";
 
-  const estado = payload.estado || "Activo";
-  const disponibilidad =
-    payload.disponibilidad || normalizeEstadoToDisponibilidad(estado);
+  const tiposProducto = uniqueText([
+    ...normalizeArrayText(payload.tiposProducto),
+    ...normalizeArrayText(payload.tipoProducto),
+    ...normalizeArrayText(payload.tipo),
+    ...normalizeArrayText(payload.type)
+  ]);
 
-  const serieValue = payload.serieId || payload.serie || payload.serieNombre || "";
-  const eventoValue =
-    payload.eventoId || payload.evento || payload.eventoNombre || "";
+  const tiposProductoTexto = tiposProducto.join(", ");
 
-  const categoriaValue =
-    payload.categoriaId || payload.categoria || payload.categoriaNombre || "";
-
-  const origenValue = payload.origen || payload.origenNombre || "Variado";
+  const personajesNombre = uniqueText([
+    ...normalizeArrayText(payload.personajesNombre),
+    ...normalizeArrayText(payload.personajeNombre),
+    ...normalizeArrayText(payload.personaje)
+  ]);
 
   const apiPayload = {
     nombre: payload.nombre || payload.name || "",
-    descripcion:
-      payload.descripcion ||
-      "Producto registrado desde el panel administrador de Smika Store.",
+    descripcion: payload.descripcion || "",
 
-    precioReferencial: precio,
-    precio,
-    price: precio,
-
-    precioAnterior:
-      payload.precioAnterior !== undefined && payload.precioAnterior !== ""
-        ? Number(payload.precioAnterior)
-        : null,
-
-    categoria: isMongoObjectId(categoriaValue) ? categoriaValue : "",
-    categoriaNombre: payload.categoriaNombre || "",
-
-    subcategoria: isMongoObjectId(payload.subcategoria)
-      ? payload.subcategoria
-      : "",
-    subcategoriaNombre: payload.subcategoriaNombre || "",
+    categoria: isMongoObjectId(categoryValue) ? categoryValue : "",
+    categoriaId: isMongoObjectId(categoryValue) ? categoryValue : "",
+    categoriaNombre: payload.categoriaNombre || getRelatedName(categoryValue),
 
     serie: isMongoObjectId(serieValue) ? serieValue : "",
-    serieNombre: isMongoObjectId(serieValue)
-      ? payload.serieNombre || ""
-      : serieValue,
+    serieId: isMongoObjectId(serieValue) ? serieValue : "",
+    serieNombre: payload.serieNombre || getRelatedName(serieValue),
 
-    evento: isMongoObjectId(eventoValue) ? eventoValue : "",
-    eventoNombre: isMongoObjectId(eventoValue)
-      ? payload.eventoNombre || ""
-      : eventoValue,
+    evento: isMongoObjectId(eventValue) ? eventValue : "",
+    eventoId: isMongoObjectId(eventValue) ? eventValue : "",
+    eventoNombre: payload.eventoNombre || getRelatedName(eventValue),
 
-    origen: isMongoObjectId(origenValue) ? origenValue : "",
-    origenNombre: isMongoObjectId(origenValue)
-      ? payload.origenNombre || ""
-      : origenValue,
+    origen: isMongoObjectId(originValue) ? originValue : "",
+    origenNombre:
+      payload.origenNombre ||
+      payload.pais ||
+      (isMongoObjectId(originValue) ? "" : getRelatedName(originValue)),
+    pais:
+      payload.pais ||
+      payload.origenNombre ||
+      (isMongoObjectId(originValue) ? "" : getRelatedName(originValue)),
 
-    personajes: Array.isArray(payload.personajes)
-      ? payload.personajes.filter(isMongoObjectId)
-      : [],
+    tipo: tiposProductoTexto || "Producto",
+    tipoProducto: tiposProductoTexto || "Producto",
+    tiposProducto,
 
-    personajesNombre: Array.isArray(payload.personajesNombre)
-      ? payload.personajesNombre
-      : payload.personaje
-      ? [payload.personaje]
-      : [],
-
-    personajeNombre: payload.personajeNombre || payload.personaje || "",
-
-    marca: payload.marca || "Smika Store",
-    tipoProducto: payload.tipoProducto || payload.tipo || payload.type || "Producto",
+    personajeNombre: personajesNombre.join(", "),
+    personajesNombre,
 
     material: payload.material || "",
-    tamano: payload.tamano || "",
+    tamano: payload.tamano || payload.tamaño || "",
 
-    disponibilidad,
-    estado,
+    precio: Number(payload.precio ?? payload.price ?? payload.precioReferencial ?? 0),
+    precioReferencial: Number(
+      payload.precioReferencial ?? payload.precio ?? payload.price ?? 0
+    ),
+    price: Number(payload.price ?? payload.precio ?? payload.precioReferencial ?? 0),
 
     stock: Number(payload.stock || 0),
+
+    disponibilidad: payload.disponibilidad || "stock",
+    estado: payload.estado || "Activo",
     tiempoEstimado: payload.tiempoEstimado || "",
 
     adulto: Boolean(payload.adulto),
-    esNuevo: payload.esNuevo !== undefined ? Boolean(payload.esNuevo) : true,
+    esNuevo:
+      payload.esNuevo !== undefined ? Boolean(payload.esNuevo) : Boolean(payload.nuevo),
     esDestacado:
-      payload.esDestacado !== undefined ? Boolean(payload.esDestacado) : false,
+      payload.esDestacado !== undefined
+        ? Boolean(payload.esDestacado)
+        : Boolean(payload.destacado),
 
-    activo:
-      payload.activo !== undefined ? Boolean(payload.activo) : estado !== "Inactivo"
+    activo: payload.activo !== undefined ? Boolean(payload.activo) : true
   };
 
   if (shouldSendImages(payload, options.includeImages === true)) {
-    apiPayload.imagenes = Array.isArray(payload.imagenes)
-      ? payload.imagenes
-      : [];
+    apiPayload.imagenes = normalizeImageList(payload.imagenes);
     apiPayload.imagenesTouched = true;
   }
 
@@ -632,47 +704,51 @@ function buildProductPayloadForApi(payload = {}, options = {}) {
 }
 
 function buildSeriesPayloadForApi(payload = {}, options = {}) {
-  const categoryName =
-    payload.categoriaPrincipalNombre ||
-    payload.categoriaNombre ||
+  const categoryValue =
+    payload.categoriaPrincipal ||
     payload.categoria ||
-    "Series";
+    payload.categoriaNombre ||
+    payload.categoriaPrincipalNombre ||
+    "";
 
-  const originName =
-    payload.origenNombre || payload.paisNombre || payload.origen || "Variado";
+  const originValue = payload.origen || payload.origenNombre || payload.pais || "";
+
+  const creadoresNombre = uniqueText([
+    ...normalizeArrayText(payload.creadoresNombre),
+    ...normalizeArrayText(payload.autor),
+    ...normalizeArrayText(payload.creadores)
+  ]);
 
   const apiPayload = {
     nombre: payload.nombre || payload.name || "",
     descripcion: payload.descripcion || "",
 
-    categoriaPrincipal: isMongoObjectId(payload.categoriaPrincipal)
-      ? payload.categoriaPrincipal
-      : "",
+    categoriaPrincipal: isMongoObjectId(categoryValue) ? categoryValue : "",
+    categoriaPrincipalNombre: isMongoObjectId(categoryValue)
+      ? payload.categoriaPrincipalNombre || payload.categoriaNombre || ""
+      : categoryValue || "Series",
+    categoriaNombre: isMongoObjectId(categoryValue)
+      ? payload.categoriaNombre || payload.categoriaPrincipalNombre || ""
+      : categoryValue || "Series",
 
-    categoriaPrincipalNombre: categoryName,
-    categoriaNombre: categoryName,
-
-    subcategoria: isMongoObjectId(payload.subcategoria)
-      ? payload.subcategoria
-      : "",
-
+    subcategoria: isMongoObjectId(payload.subcategoria) ? payload.subcategoria : "",
     subcategoriaNombre: payload.subcategoriaNombre || "",
 
-    origen: isMongoObjectId(payload.origen) ? payload.origen : "",
-    origenNombre: originName,
+    origen: isMongoObjectId(originValue) ? originValue : "",
+    origenNombre: isMongoObjectId(originValue)
+      ? payload.origenNombre || ""
+      : originValue || "Variado",
 
-    pais: payload.pais || originName || "V",
+    pais: payload.pais || payload.origenNombre || "V",
 
-    tipo: payload.tipo || categoryName || "Historia",
+    tipo: payload.tipo || payload.categoriaNombre || "Historia",
     genero: payload.genero || "",
 
     creadores: Array.isArray(payload.creadores)
       ? payload.creadores.filter(isMongoObjectId)
       : [],
-
-    creadoresNombre: Array.isArray(payload.creadoresNombre)
-      ? payload.creadoresNombre
-      : normalizeArrayText(payload.autor),
+    creadoresNombre,
+    autor: creadoresNombre.join(", "),
 
     destacada: Boolean(payload.destacada),
 
@@ -714,9 +790,11 @@ function buildEventPayloadForApi(payload = {}, options = {}) {
     ? payload.series.filter(isMongoObjectId)
     : [];
 
-  const selectedSeriesNames = Array.isArray(payload.seriesNombre)
-    ? payload.seriesNombre.filter(Boolean)
-    : normalizeArrayText(payload.serieNombre || payload.serie);
+  const selectedSeriesNames = uniqueText([
+    ...normalizeArrayText(payload.seriesNombre),
+    ...normalizeArrayText(payload.serieNombre),
+    ...normalizeArrayText(payload.serie)
+  ]);
 
   const categoryValue = payload.categoria || payload.categoriaNombre || "";
   const originValue = payload.origen || payload.origenNombre || payload.pais || "";
@@ -745,6 +823,7 @@ function buildEventPayloadForApi(payload = {}, options = {}) {
     pais: payload.pais || payload.origenNombre || "V",
 
     tipoEvento: payload.tipoEvento || payload.tipo || "Otro",
+    tipo: payload.tipo || payload.tipoEvento || "Otro",
 
     fechaInicio: payload.fechaInicio || null,
     fechaFin: payload.fechaFin || null,
@@ -770,23 +849,18 @@ function buildEventPayloadForApi(payload = {}, options = {}) {
   return apiPayload;
 }
 
-const defaultAdminData = {
-  products: [],
-  events: [],
-  series: [],
-  characters: [],
-  categories: [],
-  creators: [],
-  origins: [],
-  users: []
-};
+function replaceItemById(collection = [], item) {
+  const itemId = getId(item);
 
-function getInitialAdminData() {
-  return defaultAdminData;
+  if (!itemId) return [item, ...collection];
+
+  const withoutItem = collection.filter((currentItem) => getId(currentItem) !== itemId);
+
+  return [item, ...withoutItem];
 }
 
 export function AdminDataProvider({ children }) {
-  const [adminData, setAdminData] = useState(getInitialAdminData);
+  const [adminData, setAdminData] = useState(defaultAdminData);
   const [storageError, setStorageError] = useState("");
 
   const [productLoadError, setProductLoadError] = useState("");
@@ -809,12 +883,10 @@ export function AdminDataProvider({ children }) {
     setAdminData((currentData) => {
       const currentCollection = currentData[collectionName] || [];
 
-      const nextCollection =
-        typeof updater === "function" ? updater(currentCollection) : updater;
-
       return {
         ...currentData,
-        [collectionName]: nextCollection
+        [collectionName]:
+          typeof updater === "function" ? updater(currentCollection) : updater
       };
     });
   };
@@ -824,21 +896,16 @@ export function AdminDataProvider({ children }) {
     setProductLoadError("");
 
     try {
-      const data = await apiGetProducts({
-        activos: "false"
-      });
-
-      const productsFromApi = data.products || data.productos || data.data || [];
-      const normalizedProducts = productsFromApi.map(normalizeProductFromApi);
-
-      updateCollection("products", normalizedProducts);
-
-      return normalizedProducts;
-    } catch (error) {
-      setProductLoadError(
-        error.message || "No se pudieron cargar los productos desde MongoDB."
+      const data = await apiGetProducts();
+      const list = pickList(data, ["products", "productos", "items"]).map(
+        normalizeProductFromApi
       );
 
+      updateCollection("products", list);
+
+      return list;
+    } catch (error) {
+      setProductLoadError(error.message || "No se pudieron cargar los productos.");
       return [];
     } finally {
       setLoadingProducts(false);
@@ -850,21 +917,14 @@ export function AdminDataProvider({ children }) {
     setSeriesLoadError("");
 
     try {
-      const data = await apiGetSeries({
-        activos: "false"
-      });
+      const data = await apiGetSeries();
+      const list = pickList(data, ["series", "items"]).map(normalizeSeriesFromApi);
 
-      const seriesFromApi = data.series || data.data || [];
-      const normalizedSeries = seriesFromApi.map(normalizeSeriesFromApi);
+      updateCollection("series", list);
 
-      updateCollection("series", normalizedSeries);
-
-      return normalizedSeries;
+      return list;
     } catch (error) {
-      setSeriesLoadError(
-        error.message || "No se pudieron cargar las series desde MongoDB."
-      );
-
+      setSeriesLoadError(error.message || "No se pudieron cargar las series.");
       return [];
     } finally {
       setLoadingSeries(false);
@@ -876,21 +936,16 @@ export function AdminDataProvider({ children }) {
     setEventsLoadError("");
 
     try {
-      const data = await apiGetEvents({
-        activos: "false"
-      });
-
-      const eventsFromApi = data.events || data.eventos || data.data || [];
-      const normalizedEvents = eventsFromApi.map(normalizeEventFromApi);
-
-      updateCollection("events", normalizedEvents);
-
-      return normalizedEvents;
-    } catch (error) {
-      setEventsLoadError(
-        error.message || "No se pudieron cargar los eventos desde MongoDB."
+      const data = await apiGetEvents();
+      const list = pickList(data, ["events", "eventos", "items"]).map(
+        normalizeEventFromApi
       );
 
+      updateCollection("events", list);
+
+      return list;
+    } catch (error) {
+      setEventsLoadError(error.message || "No se pudieron cargar los eventos.");
       return [];
     } finally {
       setLoadingEvents(false);
@@ -902,21 +957,18 @@ export function AdminDataProvider({ children }) {
     setCharactersLoadError("");
 
     try {
-      const data = await apiGetCharacters({
-        activos: "false"
-      });
-
-      const charactersFromApi = data.characters || data.data || [];
-      const normalizedCharacters = charactersFromApi.map(normalizeCharacterFromApi);
-
-      updateCollection("characters", normalizedCharacters);
-
-      return normalizedCharacters;
-    } catch (error) {
-      setCharactersLoadError(
-        error.message || "No se pudieron cargar los personajes desde MongoDB."
+      const data = await apiGetCharacters();
+      const list = pickList(data, ["characters", "personajes", "items"]).map(
+        normalizeCharacterFromApi
       );
 
+      updateCollection("characters", list);
+
+      return list;
+    } catch (error) {
+      setCharactersLoadError(
+        error.message || "No se pudieron cargar los personajes."
+      );
       return [];
     } finally {
       setLoadingCharacters(false);
@@ -928,22 +980,18 @@ export function AdminDataProvider({ children }) {
     setCategoriesLoadError("");
 
     try {
-      const data = await apiGetCategories({
-        activos: "false"
-      });
-
-      const categoriesFromApi =
-        data.categories || data.categorias || data.data || [];
-      const normalizedCategories = categoriesFromApi.map(normalizeCategoryFromApi);
-
-      updateCollection("categories", normalizedCategories);
-
-      return normalizedCategories;
-    } catch (error) {
-      setCategoriesLoadError(
-        error.message || "No se pudieron cargar las categorías desde MongoDB."
+      const data = await apiGetCategories();
+      const list = pickList(data, ["categories", "categorias", "items"]).map(
+        normalizeCategoryFromApi
       );
 
+      updateCollection("categories", list);
+
+      return list;
+    } catch (error) {
+      setCategoriesLoadError(
+        error.message || "No se pudieron cargar las categorías."
+      );
       return [];
     } finally {
       setLoadingCategories(false);
@@ -955,21 +1003,18 @@ export function AdminDataProvider({ children }) {
     setCreatorsLoadError("");
 
     try {
-      const data = await apiGetCreators({
-        activos: "false"
-      });
-
-      const creatorsFromApi = data.creators || data.creadores || data.data || [];
-      const normalizedCreators = creatorsFromApi.map(normalizeCreatorFromApi);
-
-      updateCollection("creators", normalizedCreators);
-
-      return normalizedCreators;
-    } catch (error) {
-      setCreatorsLoadError(
-        error.message || "No se pudieron cargar los creadores desde MongoDB."
+      const data = await apiGetCreators();
+      const list = pickList(data, ["creators", "creadores", "items"]).map(
+        normalizeCreatorFromApi
       );
 
+      updateCollection("creators", list);
+
+      return list;
+    } catch (error) {
+      setCreatorsLoadError(
+        error.message || "No se pudieron cargar los autores/creadores."
+      );
       return [];
     } finally {
       setLoadingCreators(false);
@@ -981,21 +1026,18 @@ export function AdminDataProvider({ children }) {
     setOriginsLoadError("");
 
     try {
-      const data = await apiGetOrigins({
-        activos: "false"
-      });
-
-      const originsFromApi = data.origins || data.origenes || data.data || [];
-      const normalizedOrigins = originsFromApi.map(normalizeOriginFromApi);
-
-      updateCollection("origins", normalizedOrigins);
-
-      return normalizedOrigins;
-    } catch (error) {
-      setOriginsLoadError(
-        error.message || "No se pudieron cargar los países/orígenes desde MongoDB."
+      const data = await apiGetOrigins();
+      const list = pickList(data, ["origins", "origenes", "items"]).map(
+        normalizeOriginFromApi
       );
 
+      updateCollection("origins", list);
+
+      return list;
+    } catch (error) {
+      setOriginsLoadError(
+        error.message || "No se pudieron cargar los países/orígenes."
+      );
       return [];
     } finally {
       setLoadingOrigins(false);
@@ -1023,8 +1065,10 @@ export function AdminDataProvider({ children }) {
       localStorage.removeItem(STORAGE_KEY);
       setStorageError("");
     } catch (error) {
-      console.error("No se pudo limpiar la información local de Smika.", error);
-      setStorageError("");
+      console.error("No se pudo limpiar el almacenamiento local antiguo.", error);
+      setStorageError(
+        "No se pudo limpiar el almacenamiento local antiguo. Si el aviso continúa, limpia el almacenamiento del sitio desde el navegador."
+      );
     }
   }, []);
 
@@ -1034,16 +1078,13 @@ export function AdminDataProvider({ children }) {
     });
 
     const data = await apiCreateProduct(apiPayload);
-    const createdProduct = normalizeProductFromApi(data.product);
+    const createdProduct = normalizeProductFromApi(
+      pickOne(data, ["product", "producto"])
+    );
 
-    updateCollection("products", (currentProducts) => [
-      createdProduct,
-      ...currentProducts.filter(
-        (product) =>
-          (product._id || product.id) !==
-          (createdProduct._id || createdProduct.id)
-      )
-    ]);
+    updateCollection("products", (currentProducts) =>
+      replaceItemById(currentProducts, createdProduct)
+    );
 
     return createdProduct;
   };
@@ -1054,11 +1095,13 @@ export function AdminDataProvider({ children }) {
     });
 
     const data = await apiUpdateProduct(productId, apiPayload);
-    const updatedProduct = normalizeProductFromApi(data.product);
+    const updatedProduct = normalizeProductFromApi(
+      pickOne(data, ["product", "producto"])
+    );
 
     updateCollection("products", (currentProducts) =>
       currentProducts.map((product) =>
-        (product._id || product.id) === productId ? updatedProduct : product
+        getId(product) === productId ? updatedProduct : product
       )
     );
 
@@ -1066,45 +1109,41 @@ export function AdminDataProvider({ children }) {
   };
 
   const toggleProductStatus = async (productId) => {
-    const product = adminData.products.find(
-      (item) => (item._id || item.id) === productId
-    );
+    const product = adminData.products.find((item) => getId(item) === productId);
 
     if (!product) throw new Error("Producto no encontrado.");
 
-    if (product.activo) {
+    if (product.activo !== false) {
       await apiDeleteProduct(productId);
 
       const disabledProduct = {
         ...product,
         activo: false,
-        estado: "Inactivo",
-        updatedAt: new Date().toISOString()
+        estado: product.estado === "Activo" ? "Inactivo" : product.estado
       };
 
       updateCollection("products", (currentProducts) =>
         currentProducts.map((item) =>
-          (item._id || item.id) === productId ? disabledProduct : item
+          getId(item) === productId ? disabledProduct : item
         )
       );
 
       return disabledProduct;
     }
 
-    const data = await apiUpdateProduct(
-      productId,
-      buildProductPayloadForApi({
-        ...product,
-        activo: true,
-        estado: "Activo"
-      })
-    );
+    const data = await apiUpdateProduct(productId, {
+      ...buildProductPayloadForApi(product),
+      activo: true,
+      estado: product.estado === "Inactivo" ? "Activo" : product.estado || "Activo"
+    });
 
-    const enabledProduct = normalizeProductFromApi(data.product);
+    const enabledProduct = normalizeProductFromApi(
+      pickOne(data, ["product", "producto"])
+    );
 
     updateCollection("products", (currentProducts) =>
       currentProducts.map((item) =>
-        (item._id || item.id) === productId ? enabledProduct : item
+        getId(item) === productId ? enabledProduct : item
       )
     );
 
@@ -1117,16 +1156,11 @@ export function AdminDataProvider({ children }) {
     });
 
     const data = await apiCreateSeries(apiPayload);
-    const createdSeries = normalizeSeriesFromApi(data.serie);
+    const createdSeries = normalizeSeriesFromApi(pickOne(data, ["serie", "series"]));
 
-    updateCollection("series", (currentSeries) => [
-      createdSeries,
-      ...currentSeries.filter(
-        (serie) =>
-          (serie._id || serie.id) !==
-          (createdSeries._id || createdSeries.id)
-      )
-    ]);
+    updateCollection("series", (currentSeries) =>
+      replaceItemById(currentSeries, createdSeries)
+    );
 
     return createdSeries;
   };
@@ -1137,11 +1171,11 @@ export function AdminDataProvider({ children }) {
     });
 
     const data = await apiUpdateSeries(seriesId, apiPayload);
-    const updatedSeries = normalizeSeriesFromApi(data.serie);
+    const updatedSeries = normalizeSeriesFromApi(pickOne(data, ["serie", "series"]));
 
     updateCollection("series", (currentSeries) =>
       currentSeries.map((serie) =>
-        (serie._id || serie.id) === seriesId ? updatedSeries : serie
+        getId(serie) === seriesId ? updatedSeries : serie
       )
     );
 
@@ -1149,13 +1183,11 @@ export function AdminDataProvider({ children }) {
   };
 
   const toggleSeriesStatus = async (seriesId) => {
-    const serie = adminData.series.find(
-      (item) => (item._id || item.id) === seriesId
-    );
+    const serie = adminData.series.find((item) => getId(item) === seriesId);
 
     if (!serie) throw new Error("Serie no encontrada.");
 
-    if (serie.activo) {
+    if (serie.activo !== false && serie.activa !== false) {
       await apiDeleteSeries(seriesId);
 
       const disabledSeries = {
@@ -1166,27 +1198,24 @@ export function AdminDataProvider({ children }) {
 
       updateCollection("series", (currentSeries) =>
         currentSeries.map((item) =>
-          (item._id || item.id) === seriesId ? disabledSeries : item
+          getId(item) === seriesId ? disabledSeries : item
         )
       );
 
       return disabledSeries;
     }
 
-    const data = await apiUpdateSeries(
-      seriesId,
-      buildSeriesPayloadForApi({
-        ...serie,
-        activo: true,
-        activa: true
-      })
-    );
+    const data = await apiUpdateSeries(seriesId, {
+      ...buildSeriesPayloadForApi(serie),
+      activo: true,
+      activa: true
+    });
 
-    const enabledSeries = normalizeSeriesFromApi(data.serie);
+    const enabledSeries = normalizeSeriesFromApi(pickOne(data, ["serie", "series"]));
 
     updateCollection("series", (currentSeries) =>
       currentSeries.map((item) =>
-        (item._id || item.id) === seriesId ? enabledSeries : item
+        getId(item) === seriesId ? enabledSeries : item
       )
     );
 
@@ -1199,16 +1228,11 @@ export function AdminDataProvider({ children }) {
     });
 
     const data = await apiCreateEvent(apiPayload);
-    const createdEvent = normalizeEventFromApi(data.event);
+    const createdEvent = normalizeEventFromApi(pickOne(data, ["event", "evento"]));
 
-    updateCollection("events", (currentEvents) => [
-      createdEvent,
-      ...currentEvents.filter(
-        (event) =>
-          (event._id || event.id) !==
-          (createdEvent._id || createdEvent.id)
-      )
-    ]);
+    updateCollection("events", (currentEvents) =>
+      replaceItemById(currentEvents, createdEvent)
+    );
 
     return createdEvent;
   };
@@ -1219,11 +1243,11 @@ export function AdminDataProvider({ children }) {
     });
 
     const data = await apiUpdateEvent(eventId, apiPayload);
-    const updatedEvent = normalizeEventFromApi(data.event);
+    const updatedEvent = normalizeEventFromApi(pickOne(data, ["event", "evento"]));
 
     updateCollection("events", (currentEvents) =>
       currentEvents.map((event) =>
-        (event._id || event.id) === eventId ? updatedEvent : event
+        getId(event) === eventId ? updatedEvent : event
       )
     );
 
@@ -1231,13 +1255,11 @@ export function AdminDataProvider({ children }) {
   };
 
   const toggleEventStatus = async (eventId) => {
-    const event = adminData.events.find(
-      (item) => (item._id || item.id) === eventId
-    );
+    const event = adminData.events.find((item) => getId(item) === eventId);
 
     if (!event) throw new Error("Evento no encontrado.");
 
-    if (event.activo) {
+    if (event.activo !== false) {
       await apiDeleteEvent(eventId);
 
       const disabledEvent = {
@@ -1247,26 +1269,23 @@ export function AdminDataProvider({ children }) {
 
       updateCollection("events", (currentEvents) =>
         currentEvents.map((item) =>
-          (item._id || item.id) === eventId ? disabledEvent : item
+          getId(item) === eventId ? disabledEvent : item
         )
       );
 
       return disabledEvent;
     }
 
-    const data = await apiUpdateEvent(
-      eventId,
-      buildEventPayloadForApi({
-        ...event,
-        activo: true
-      })
-    );
+    const data = await apiUpdateEvent(eventId, {
+      ...buildEventPayloadForApi(event),
+      activo: true
+    });
 
-    const enabledEvent = normalizeEventFromApi(data.event);
+    const enabledEvent = normalizeEventFromApi(pickOne(data, ["event", "evento"]));
 
     updateCollection("events", (currentEvents) =>
       currentEvents.map((item) =>
-        (item._id || item.id) === eventId ? enabledEvent : item
+        getId(item) === eventId ? enabledEvent : item
       )
     );
 
@@ -1276,16 +1295,13 @@ export function AdminDataProvider({ children }) {
   const createCategoryFull = async (payload) => {
     const apiPayload = buildCategoryPayloadForApi(payload);
     const data = await apiCreateCategory(apiPayload);
-    const createdCategory = normalizeCategoryFromApi(data.category);
+    const createdCategory = normalizeCategoryFromApi(
+      pickOne(data, ["category", "categoria"])
+    );
 
-    updateCollection("categories", (currentCategories) => [
-      createdCategory,
-      ...currentCategories.filter(
-        (category) =>
-          (category._id || category.id) !==
-          (createdCategory._id || createdCategory.id)
-      )
-    ]);
+    updateCollection("categories", (currentCategories) =>
+      replaceItemById(currentCategories, createdCategory)
+    );
 
     return createdCategory;
   };
@@ -1293,13 +1309,13 @@ export function AdminDataProvider({ children }) {
   const updateCategory = async (categoryId, payload) => {
     const apiPayload = buildCategoryPayloadForApi(payload);
     const data = await apiUpdateCategory(categoryId, apiPayload);
-    const updatedCategory = normalizeCategoryFromApi(data.category);
+    const updatedCategory = normalizeCategoryFromApi(
+      pickOne(data, ["category", "categoria"])
+    );
 
     updateCollection("categories", (currentCategories) =>
       currentCategories.map((category) =>
-        (category._id || category.id) === categoryId
-          ? updatedCategory
-          : category
+        getId(category) === categoryId ? updatedCategory : category
       )
     );
 
@@ -1307,13 +1323,11 @@ export function AdminDataProvider({ children }) {
   };
 
   const toggleCategoryStatus = async (categoryId) => {
-    const category = adminData.categories.find(
-      (item) => (item._id || item.id) === categoryId
-    );
+    const category = adminData.categories.find((item) => getId(item) === categoryId);
 
     if (!category) throw new Error("Categoría no encontrada.");
 
-    if (category.activa !== false) {
+    if (category.activa !== false && category.activo !== false) {
       await apiDeleteCategory(categoryId);
 
       const disabledCategory = {
@@ -1324,7 +1338,7 @@ export function AdminDataProvider({ children }) {
 
       updateCollection("categories", (currentCategories) =>
         currentCategories.map((item) =>
-          (item._id || item.id) === categoryId ? disabledCategory : item
+          getId(item) === categoryId ? disabledCategory : item
         )
       );
 
@@ -1333,14 +1347,17 @@ export function AdminDataProvider({ children }) {
 
     const data = await apiUpdateCategory(categoryId, {
       ...buildCategoryPayloadForApi(category),
-      activa: true
+      activa: true,
+      activo: true
     });
 
-    const enabledCategory = normalizeCategoryFromApi(data.category);
+    const enabledCategory = normalizeCategoryFromApi(
+      pickOne(data, ["category", "categoria"])
+    );
 
     updateCollection("categories", (currentCategories) =>
       currentCategories.map((item) =>
-        (item._id || item.id) === categoryId ? enabledCategory : item
+        getId(item) === categoryId ? enabledCategory : item
       )
     );
 
@@ -1350,16 +1367,13 @@ export function AdminDataProvider({ children }) {
   const createCreatorFull = async (payload) => {
     const apiPayload = buildCreatorPayloadForApi(payload);
     const data = await apiCreateCreator(apiPayload);
-    const createdCreator = normalizeCreatorFromApi(data.creator);
+    const createdCreator = normalizeCreatorFromApi(
+      pickOne(data, ["creator", "creador"])
+    );
 
-    updateCollection("creators", (currentCreators) => [
-      createdCreator,
-      ...currentCreators.filter(
-        (creator) =>
-          (creator._id || creator.id) !==
-          (createdCreator._id || createdCreator.id)
-      )
-    ]);
+    updateCollection("creators", (currentCreators) =>
+      replaceItemById(currentCreators, createdCreator)
+    );
 
     return createdCreator;
   };
@@ -1367,11 +1381,13 @@ export function AdminDataProvider({ children }) {
   const updateCreator = async (creatorId, payload) => {
     const apiPayload = buildCreatorPayloadForApi(payload);
     const data = await apiUpdateCreator(creatorId, apiPayload);
-    const updatedCreator = normalizeCreatorFromApi(data.creator);
+    const updatedCreator = normalizeCreatorFromApi(
+      pickOne(data, ["creator", "creador"])
+    );
 
     updateCollection("creators", (currentCreators) =>
       currentCreators.map((creator) =>
-        (creator._id || creator.id) === creatorId ? updatedCreator : creator
+        getId(creator) === creatorId ? updatedCreator : creator
       )
     );
 
@@ -1379,9 +1395,7 @@ export function AdminDataProvider({ children }) {
   };
 
   const toggleCreatorStatus = async (creatorId) => {
-    const creator = adminData.creators.find(
-      (item) => (item._id || item.id) === creatorId
-    );
+    const creator = adminData.creators.find((item) => getId(item) === creatorId);
 
     if (!creator) throw new Error("Creador no encontrado.");
 
@@ -1395,7 +1409,7 @@ export function AdminDataProvider({ children }) {
 
       updateCollection("creators", (currentCreators) =>
         currentCreators.map((item) =>
-          (item._id || item.id) === creatorId ? disabledCreator : item
+          getId(item) === creatorId ? disabledCreator : item
         )
       );
 
@@ -1407,11 +1421,13 @@ export function AdminDataProvider({ children }) {
       activo: true
     });
 
-    const enabledCreator = normalizeCreatorFromApi(data.creator);
+    const enabledCreator = normalizeCreatorFromApi(
+      pickOne(data, ["creator", "creador"])
+    );
 
     updateCollection("creators", (currentCreators) =>
       currentCreators.map((item) =>
-        (item._id || item.id) === creatorId ? enabledCreator : item
+        getId(item) === creatorId ? enabledCreator : item
       )
     );
 
@@ -1421,16 +1437,11 @@ export function AdminDataProvider({ children }) {
   const createOriginFull = async (payload) => {
     const apiPayload = buildOriginPayloadForApi(payload);
     const data = await apiCreateOrigin(apiPayload);
-    const createdOrigin = normalizeOriginFromApi(data.origin);
+    const createdOrigin = normalizeOriginFromApi(pickOne(data, ["origin", "origen"]));
 
-    updateCollection("origins", (currentOrigins) => [
-      createdOrigin,
-      ...currentOrigins.filter(
-        (origin) =>
-          (origin._id || origin.id) !==
-          (createdOrigin._id || createdOrigin.id)
-      )
-    ]);
+    updateCollection("origins", (currentOrigins) =>
+      replaceItemById(currentOrigins, createdOrigin)
+    );
 
     return createdOrigin;
   };
@@ -1438,11 +1449,11 @@ export function AdminDataProvider({ children }) {
   const updateOrigin = async (originId, payload) => {
     const apiPayload = buildOriginPayloadForApi(payload);
     const data = await apiUpdateOrigin(originId, apiPayload);
-    const updatedOrigin = normalizeOriginFromApi(data.origin);
+    const updatedOrigin = normalizeOriginFromApi(pickOne(data, ["origin", "origen"]));
 
     updateCollection("origins", (currentOrigins) =>
       currentOrigins.map((origin) =>
-        (origin._id || origin.id) === originId ? updatedOrigin : origin
+        getId(origin) === originId ? updatedOrigin : origin
       )
     );
 
@@ -1450,9 +1461,7 @@ export function AdminDataProvider({ children }) {
   };
 
   const toggleOriginStatus = async (originId) => {
-    const origin = adminData.origins.find(
-      (item) => (item._id || item.id) === originId
-    );
+    const origin = adminData.origins.find((item) => getId(item) === originId);
 
     if (!origin) throw new Error("Origen no encontrado.");
 
@@ -1466,7 +1475,7 @@ export function AdminDataProvider({ children }) {
 
       updateCollection("origins", (currentOrigins) =>
         currentOrigins.map((item) =>
-          (item._id || item.id) === originId ? disabledOrigin : item
+          getId(item) === originId ? disabledOrigin : item
         )
       );
 
@@ -1478,33 +1487,52 @@ export function AdminDataProvider({ children }) {
       activo: true
     });
 
-    const enabledOrigin = normalizeOriginFromApi(data.origin);
+    const enabledOrigin = normalizeOriginFromApi(pickOne(data, ["origin", "origen"]));
 
     updateCollection("origins", (currentOrigins) =>
       currentOrigins.map((item) =>
-        (item._id || item.id) === originId ? enabledOrigin : item
+        getId(item) === originId ? enabledOrigin : item
       )
     );
 
     return enabledOrigin;
   };
 
-  const createCharacterQuick = async ({ name, serie = "" }) => {
+  const createCharacterFull = async (payload) => {
+    const apiPayload = buildCharacterPayloadForApi(payload);
+    const data = await apiCreateCharacter(apiPayload);
+    const createdCharacter = normalizeCharacterFromApi(
+      pickOne(data, ["character", "personaje"])
+    );
+
+    updateCollection("characters", (currentCharacters) =>
+      replaceItemById(currentCharacters, createdCharacter)
+    );
+
+    return createdCharacter;
+  };
+
+  const createCharacterQuick = async ({ name, serie = "", serieId = "" }) => {
     const cleanName = name?.trim();
     const cleanSerie = serie?.trim() || "Sin serie definida";
+    const cleanSerieId = isMongoObjectId(serieId) ? serieId : "";
 
     if (!cleanName) return null;
 
-    const existingCharacter = adminData.characters.find(
-      (character) =>
-        character.nombre.toLowerCase() === cleanName.toLowerCase() &&
-        character.serie.toLowerCase() === cleanSerie.toLowerCase()
-    );
+    const existingCharacter = adminData.characters.find((character) => {
+      const sameName = normalizeText(character.nombre) === normalizeText(cleanName);
+      const sameSerie =
+        normalizeText(character.serieNombre || character.serie) ===
+        normalizeText(cleanSerie);
+
+      return sameName && sameSerie;
+    });
 
     if (existingCharacter) return existingCharacter;
 
     const data = await apiCreateCharacter({
       nombre: cleanName,
+      serie: cleanSerieId,
       serieNombre: cleanSerie,
       descripcion:
         "Personaje agregado rápidamente desde un producto. Falta completar sus detalles.",
@@ -1513,45 +1541,27 @@ export function AdminDataProvider({ children }) {
       activo: true
     });
 
-    const createdCharacter = normalizeCharacterFromApi(data.character);
+    const createdCharacter = normalizeCharacterFromApi(
+      pickOne(data, ["character", "personaje"])
+    );
 
-    updateCollection("characters", (currentCharacters) => [
-      createdCharacter,
-      ...currentCharacters.filter(
-        (character) =>
-          (character._id || character.id) !==
-          (createdCharacter._id || createdCharacter.id)
-      )
-    ]);
-
-    return createdCharacter;
-  };
-
-  const createCharacterFull = async (payload) => {
-    const data = await apiCreateCharacter(payload);
-    const createdCharacter = normalizeCharacterFromApi(data.character);
-
-    updateCollection("characters", (currentCharacters) => [
-      createdCharacter,
-      ...currentCharacters.filter(
-        (character) =>
-          (character._id || character.id) !==
-          (createdCharacter._id || createdCharacter.id)
-      )
-    ]);
+    updateCollection("characters", (currentCharacters) =>
+      replaceItemById(currentCharacters, createdCharacter)
+    );
 
     return createdCharacter;
   };
 
   const updateCharacter = async (characterId, payload) => {
-    const data = await apiUpdateCharacter(characterId, payload);
-    const updatedCharacter = normalizeCharacterFromApi(data.character);
+    const apiPayload = buildCharacterPayloadForApi(payload);
+    const data = await apiUpdateCharacter(characterId, apiPayload);
+    const updatedCharacter = normalizeCharacterFromApi(
+      pickOne(data, ["character", "personaje"])
+    );
 
     updateCollection("characters", (currentCharacters) =>
       currentCharacters.map((character) =>
-        (character._id || character.id) === characterId
-          ? updatedCharacter
-          : character
+        getId(character) === characterId ? updatedCharacter : character
       )
     );
 
@@ -1560,12 +1570,12 @@ export function AdminDataProvider({ children }) {
 
   const toggleCharacterStatus = async (characterId) => {
     const character = adminData.characters.find(
-      (item) => (item._id || item.id) === characterId
+      (item) => getId(item) === characterId
     );
 
     if (!character) throw new Error("Personaje no encontrado.");
 
-    if (character.activo) {
+    if (character.activo !== false) {
       await apiDeleteCharacter(characterId);
 
       const disabledCharacter = {
@@ -1575,7 +1585,7 @@ export function AdminDataProvider({ children }) {
 
       updateCollection("characters", (currentCharacters) =>
         currentCharacters.map((item) =>
-          (item._id || item.id) === characterId ? disabledCharacter : item
+          getId(item) === characterId ? disabledCharacter : item
         )
       );
 
@@ -1583,15 +1593,17 @@ export function AdminDataProvider({ children }) {
     }
 
     const data = await apiUpdateCharacter(characterId, {
-      ...character,
+      ...buildCharacterPayloadForApi(character),
       activo: true
     });
 
-    const enabledCharacter = normalizeCharacterFromApi(data.character);
+    const enabledCharacter = normalizeCharacterFromApi(
+      pickOne(data, ["character", "personaje"])
+    );
 
     updateCollection("characters", (currentCharacters) =>
       currentCharacters.map((item) =>
-        (item._id || item.id) === characterId ? enabledCharacter : item
+        getId(item) === characterId ? enabledCharacter : item
       )
     );
 
@@ -1708,7 +1720,7 @@ export function useAdminData() {
   const context = useContext(AdminDataContext);
 
   if (!context) {
-    throw new Error("useAdminData debe usarse dentro de AdminDataProvider.");
+    throw new Error("useAdminData debe usarse dentro de AdminDataProvider");
   }
 
   return context;

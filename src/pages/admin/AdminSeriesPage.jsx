@@ -8,12 +8,13 @@ import {
   Power,
   RefreshCw,
   Save,
-  Trash2,
   UsersRound
 } from "lucide-react";
 
 import AutoCarousel from "../../components/common/AutoCarousel";
 import ImageDropzone from "../../components/admin/ImageDropzone";
+import CreatableSelect from "../../components/admin/CreatableSelect";
+import MultiCreatableSelect from "../../components/admin/MultiCreatableSelect";
 import { useAdminData } from "../../context/AdminDataContext";
 
 const initialForm = {
@@ -51,17 +52,6 @@ const baseGenres = [
   "Aventura"
 ];
 
-function createSlug(text = "") {
-  return text
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
-}
-
 function normalizeText(text = "") {
   return text
     .toString()
@@ -71,8 +61,22 @@ function normalizeText(text = "") {
     .trim();
 }
 
+function isMongoObjectId(value) {
+  return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
+}
+
 function getId(item) {
-  return item?._id || item?.id || "";
+  if (!item) return "";
+  if (typeof item === "string") return item;
+  return item._id || item.id || "";
+}
+
+function getName(item, fallback = "") {
+  if (!item) return fallback;
+
+  if (typeof item === "string") return item;
+
+  return item.nombre || item.titulo || item.name || fallback;
 }
 
 function getImageSource(image) {
@@ -128,7 +132,6 @@ async function imageToPersistedSource(image) {
 
 async function prepareImagesForPayload(images = []) {
   const preparedImages = await Promise.all(images.map(imageToPersistedSource));
-
   const seenImages = new Set();
 
   return preparedImages
@@ -146,7 +149,7 @@ function uniqueTextOptions(values = []) {
   const map = new Map();
 
   values
-    .map((value) => value?.toString().trim())
+    .map((value) => getName(value)?.toString().trim())
     .filter(Boolean)
     .forEach((value) => {
       const key = normalizeText(value);
@@ -173,6 +176,7 @@ function getCountryCodeFromOrigin(originName = "") {
 function getSeriesStatus(serie) {
   if (serie.activo === false || serie.activa === false) return "Inactiva";
   if (serie.destacada) return "Destacada";
+
   return "Activa";
 }
 
@@ -224,207 +228,86 @@ function createEditableImageFromSource(src, index = 0) {
   };
 }
 
-function CreatableDropdown({
-  label,
-  value,
-  options = [],
-  onChange,
-  placeholder = "Escribe o selecciona",
-  createLabel,
-  helperText = ""
-}) {
-  const [isOpen, setIsOpen] = useState(false);
+function buildOption(item) {
+  if (typeof item === "string") {
+    return {
+      id: item,
+      nombre: item
+    };
+  }
 
-  const cleanValue = value?.trim() || "";
+  return {
+    ...item,
+    id: getId(item) || getName(item),
+    nombre: getName(item, "Sin nombre")
+  };
+}
 
-  const filteredOptions = useMemo(() => {
-    const search = normalizeText(cleanValue);
+function buildOptionsFromNames(names = [], realItems = []) {
+  const uniqueNames = uniqueTextOptions(names);
 
-    if (!search) return options;
+  return uniqueNames.map((name) => {
+    const realItem = realItems.find(
+      (item) => normalizeText(getName(item)) === normalizeText(name)
+    );
 
-    return options.filter((option) => normalizeText(option).includes(search));
-  }, [options, cleanValue]);
+    if (realItem) {
+      return buildOption(realItem);
+    }
 
-  const alreadyExists = options.some(
-    (option) => normalizeText(option) === normalizeText(cleanValue)
-  );
+    return {
+      id: name,
+      nombre: name
+    };
+  });
+}
 
-  const shouldShowCreate = cleanValue && !alreadyExists;
-
-  return (
-    <label className="relative grid gap-2 text-sm font-black">
-      {label}
-
-      <input
-        value={value}
-        onFocus={() => setIsOpen(true)}
-        onChange={(event) => {
-          onChange(event.target.value);
-          setIsOpen(true);
-        }}
-        onBlur={() => {
-          window.setTimeout(() => setIsOpen(false), 120);
-        }}
-        className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-        placeholder={placeholder}
-      />
-
-      {helperText && (
-        <span className="text-xs font-semibold text-gray-500">
-          {helperText}
-        </span>
-      )}
-
-      {isOpen && (
-        <div className="absolute left-0 right-0 top-[72px] z-30 max-h-64 overflow-auto rounded-2xl border border-[#87CCC8]/30 bg-white p-2 shadow-xl">
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  onChange(option);
-                  setIsOpen(false);
-                }}
-                className="w-full rounded-xl px-3 py-2 text-left text-sm font-bold hover:bg-[#F7D9D8]"
-              >
-                {option}
-              </button>
-            ))
-          ) : (
-            <p className="px-3 py-2 text-sm text-gray-500">
-              No hay coincidencias.
-            </p>
-          )}
-
-          {shouldShowCreate && (
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onChange(cleanValue);
-                setIsOpen(false);
-              }}
-              className="mt-2 w-full rounded-xl bg-[#87CCC8]/20 px-3 py-2 text-left text-sm font-black text-[#2F2F2F]"
-            >
-              {createLabel ? createLabel(cleanValue) : `Agregar “${cleanValue}”`}
-            </button>
-          )}
-        </div>
-      )}
-    </label>
+function getOptionByName(options = [], name = "") {
+  return options.find(
+    (option) => normalizeText(option.nombre) === normalizeText(name)
   );
 }
 
-function AuthorSelector({
-  authorDraft,
-  setAuthorDraft,
-  selectedAuthors,
-  setSelectedAuthors,
-  authorOptions
-}) {
-  const availableAuthors = useMemo(() => {
-    return authorOptions.filter(
-      (option) =>
-        !selectedAuthors.some(
-          (author) => normalizeText(author) === normalizeText(option)
-        )
-    );
-  }, [authorOptions, selectedAuthors]);
+function normalizeAuthorsFromSerie(serie) {
+  const creators = Array.isArray(serie?.creadoresNombre)
+    ? serie.creadoresNombre
+    : [];
 
-  const handleAddAuthor = (authorName) => {
-    const cleanAuthor = authorName?.trim();
+  const authorText = serie?.autor
+    ? serie.autor
+        .split(",")
+        .map((item) => item.trim())
+        .filter(Boolean)
+    : [];
 
-    if (!cleanAuthor) return;
-
-    setSelectedAuthors((currentAuthors) => {
-      const exists = currentAuthors.some(
-        (author) => normalizeText(author) === normalizeText(cleanAuthor)
-      );
-
-      if (exists) return currentAuthors;
-
-      return [...currentAuthors, cleanAuthor];
-    });
-
-    setAuthorDraft("");
-  };
-
-  return (
-    <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
-      <p className="font-black">Autores / Creadores</p>
-
-      <p className="mt-1 text-sm text-gray-600 leading-6">
-        Una serie puede tener más de un autor/creador. Si escribes uno nuevo,
-        aparecerá como “Agregar ___ a Autores / Creadores” y quedará enlazado a
-        esta serie.
-      </p>
-
-      <div className="mt-4">
-        <CreatableDropdown
-          label="Agregar autor/creador"
-          value={authorDraft}
-          onChange={setAuthorDraft}
-          options={availableAuthors}
-          placeholder="Busca o escribe un autor/creador"
-          createLabel={(name) => `Agregar “${name}” a Autores / Creadores`}
-          helperText="Escribe o selecciona y luego presiona Agregar."
-        />
-
-        <button
-          type="button"
-          onClick={() => handleAddAuthor(authorDraft)}
-          className="mt-3 rounded-full bg-white px-5 py-3 text-sm font-black"
-        >
-          Agregar autor/creador
-        </button>
-      </div>
-
-      {selectedAuthors.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {selectedAuthors.map((author) => (
-            <span
-              key={author}
-              className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black"
-            >
-              {author}
-
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedAuthors((currentAuthors) =>
-                    currentAuthors.filter(
-                      (item) => normalizeText(item) !== normalizeText(author)
-                    )
-                  )
-                }
-                className="text-red-500"
-                title="Quitar autor"
-              >
-                <Trash2 size={15} />
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-4 text-sm text-gray-500">
-          Todavía no agregaste autores/creadores.
-        </p>
-      )}
-    </div>
-  );
+  return uniqueTextOptions([...creators, ...authorText]);
 }
 
 function AdminSeriesPage() {
   const {
     series,
+    categories,
+    origins,
+    creators,
+
     loadingSeries,
     seriesLoadError,
+    categoriesLoadError,
+    originsLoadError,
+    creatorsLoadError,
+
     refreshSeries,
+    refreshCategories,
+    refreshOrigins,
+    refreshCreators,
+
     createSeriesFull,
     updateSeriesFull,
-    toggleSeriesStatus
+    toggleSeriesStatus,
+
+    createCategoryFull,
+    createOriginFull,
+    createCreatorFull
   } = useAdminData();
 
   const [view, setView] = useState("list");
@@ -436,7 +319,6 @@ function AdminSeriesPage() {
   const [imagesTouched, setImagesTouched] = useState(false);
 
   const [selectedAuthors, setSelectedAuthors] = useState([]);
-  const [authorDraft, setAuthorDraft] = useState("");
 
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
@@ -444,53 +326,71 @@ function AdminSeriesPage() {
   const sortedSeries = useMemo(() => {
     return [...(series || [])].sort((a, b) => {
       if (a.activo !== b.activo) return a.activo ? -1 : 1;
+
       return (a.nombre || "").localeCompare(b.nombre || "");
     });
   }, [series]);
 
   const categoryOptions = useMemo(() => {
-    const dynamicCategories = (series || []).flatMap((serie) => [
+    const activeCategories = (categories || []).filter(
+      (category) => category.activa !== false && category.activo !== false
+    );
+
+    const dynamicCategoryNames = (series || []).flatMap((serie) => [
       serie.categoriaNombre,
       serie.categoriaPrincipalNombre,
       serie.categoria
     ]);
 
-    return uniqueTextOptions([...baseCategories, ...dynamicCategories]);
-  }, [series]);
+    return buildOptionsFromNames(
+      [
+        ...baseCategories,
+        ...activeCategories.map(getName),
+        ...dynamicCategoryNames
+      ],
+      activeCategories
+    );
+  }, [categories, series]);
 
-  const countryOptions = useMemo(() => {
-    const dynamicCountries = (series || []).flatMap((serie) => [
+  const originOptions = useMemo(() => {
+    const activeOrigins = (origins || []).filter(
+      (origin) => origin.activo !== false
+    );
+
+    const dynamicOriginNames = (series || []).flatMap((serie) => [
       serie.origenNombre,
       serie.pais
     ]);
 
-    return uniqueTextOptions([...baseCountries, ...dynamicCountries]);
-  }, [series]);
+    return buildOptionsFromNames(
+      [...baseCountries, ...activeOrigins.map(getName), ...dynamicOriginNames],
+      activeOrigins
+    );
+  }, [origins, series]);
 
   const genreOptions = useMemo(() => {
     const dynamicGenres = (series || []).map((serie) => serie.genero);
 
-    return uniqueTextOptions([...baseGenres, ...dynamicGenres]);
+    return uniqueTextOptions([...baseGenres, ...dynamicGenres]).map((genre) => ({
+      id: genre,
+      nombre: genre
+    }));
   }, [series]);
 
   const authorOptions = useMemo(() => {
-    const dynamicAuthors = (series || []).flatMap((serie) => {
-      const creators = Array.isArray(serie.creadoresNombre)
-        ? serie.creadoresNombre
-        : [];
+    const activeCreators = (creators || []).filter(
+      (creator) => creator.activo !== false
+    );
 
-      const authorText = serie.autor
-        ? serie.autor
-            .split(",")
-            .map((item) => item.trim())
-            .filter(Boolean)
-        : [];
+    const dynamicAuthors = (series || []).flatMap((serie) =>
+      normalizeAuthorsFromSerie(serie)
+    );
 
-      return [...creators, ...authorText];
-    });
-
-    return uniqueTextOptions(dynamicAuthors);
-  }, [series]);
+    return buildOptionsFromNames(
+      [...activeCreators.map(getName), ...dynamicAuthors],
+      activeCreators
+    );
+  }, [creators, series]);
 
   const coverPreviewImages = useMemo(() => {
     return coverImages.map(getImageSource).filter(Boolean);
@@ -521,7 +421,6 @@ function AdminSeriesPage() {
     setCarouselImages([]);
     setImagesTouched(false);
     setSelectedAuthors([]);
-    setAuthorDraft("");
     setView("list");
   };
 
@@ -533,7 +432,6 @@ function AdminSeriesPage() {
     setCarouselImages([]);
     setImagesTouched(false);
     setSelectedAuthors([]);
-    setAuthorDraft("");
     setView("form");
   };
 
@@ -543,15 +441,7 @@ function AdminSeriesPage() {
 
     const coverImage = getCoverImageFromSerie(serie);
     const additionalImages = getAdditionalImagesFromSerie(serie);
-
-    const authors = Array.isArray(serie.creadoresNombre)
-      ? serie.creadoresNombre
-      : serie.autor
-      ? serie.autor
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean)
-      : [];
+    const authors = normalizeAuthorsFromSerie(serie);
 
     setForm({
       nombre: serie.nombre || "",
@@ -579,8 +469,7 @@ function AdminSeriesPage() {
     );
 
     setImagesTouched(false);
-    setSelectedAuthors([...new Set(authors)]);
-    setAuthorDraft("");
+    setSelectedAuthors(authors);
     setView("form");
   };
 
@@ -593,25 +482,206 @@ function AdminSeriesPage() {
     }));
   };
 
+  const handleSimpleCreatableCreate = (name) => ({
+    id: `temp-${Date.now()}-${name}`,
+    nombre: name
+  });
+
+  const ensureCategoryExists = async () => {
+    const categoryName = form.categoriaNombre.trim();
+
+    if (!categoryName) {
+      throw new Error("Selecciona o crea una categoría.");
+    }
+
+    const existingCategory = getOptionByName(categoryOptions, categoryName);
+
+    if (existingCategory && isMongoObjectId(existingCategory.id)) {
+      return {
+        id: existingCategory._id || existingCategory.id,
+        nombre: existingCategory.nombre
+      };
+    }
+
+    const categoryAlreadyInDb = (categories || []).find(
+      (category) => normalizeText(category.nombre) === normalizeText(categoryName)
+    );
+
+    if (categoryAlreadyInDb) {
+      return {
+        id: getId(categoryAlreadyInDb),
+        nombre: categoryAlreadyInDb.nombre
+      };
+    }
+
+    if (!createCategoryFull) {
+      return {
+        id: "",
+        nombre: categoryName
+      };
+    }
+
+    const createdCategory = await createCategoryFull({
+      nombre: categoryName,
+      descripcion: "Categoría creada rápidamente desde series.",
+      tipo: "principal",
+      orden: 0,
+      activa: true
+    });
+
+    await refreshCategories?.();
+
+    return {
+      id: getId(createdCategory),
+      nombre: createdCategory.nombre || categoryName
+    };
+  };
+
+  const ensureOriginExists = async () => {
+    const originName = form.origenNombre.trim();
+
+    if (!originName) {
+      throw new Error("Selecciona o crea un país/origen.");
+    }
+
+    const existingOrigin = getOptionByName(originOptions, originName);
+
+    if (existingOrigin && isMongoObjectId(existingOrigin.id)) {
+      return {
+        id: existingOrigin._id || existingOrigin.id,
+        nombre: existingOrigin.nombre
+      };
+    }
+
+    const originAlreadyInDb = (origins || []).find(
+      (origin) => normalizeText(origin.nombre) === normalizeText(originName)
+    );
+
+    if (originAlreadyInDb) {
+      return {
+        id: getId(originAlreadyInDb),
+        nombre: originAlreadyInDb.nombre
+      };
+    }
+
+    if (!createOriginFull) {
+      return {
+        id: "",
+        nombre: originName
+      };
+    }
+
+    const createdOrigin = await createOriginFull({
+      nombre: originName,
+      descripcion: "País/origen creado rápidamente desde series.",
+      activo: true
+    });
+
+    await refreshOrigins?.();
+
+    return {
+      id: getId(createdOrigin),
+      nombre: createdOrigin.nombre || originName
+    };
+  };
+
+  const ensureCreatorsExist = async () => {
+    const creatorsResult = [];
+
+    for (const authorName of selectedAuthors) {
+      const cleanAuthorName = authorName.trim();
+
+      if (!cleanAuthorName) continue;
+
+      const existingCreator = getOptionByName(authorOptions, cleanAuthorName);
+
+      if (existingCreator && isMongoObjectId(existingCreator.id)) {
+        creatorsResult.push({
+          id: existingCreator._id || existingCreator.id,
+          nombre: existingCreator.nombre
+        });
+
+        continue;
+      }
+
+      const creatorAlreadyInDb = (creators || []).find(
+        (creator) =>
+          normalizeText(creator.nombre) === normalizeText(cleanAuthorName)
+      );
+
+      if (creatorAlreadyInDb) {
+        creatorsResult.push({
+          id: getId(creatorAlreadyInDb),
+          nombre: creatorAlreadyInDb.nombre
+        });
+
+        continue;
+      }
+
+      if (!createCreatorFull) {
+        creatorsResult.push({
+          id: "",
+          nombre: cleanAuthorName
+        });
+
+        continue;
+      }
+
+      const createdCreator = await createCreatorFull({
+        nombre: cleanAuthorName,
+        tipo: "Autor",
+        descripcion: "Autor/creador agregado rápidamente desde series.",
+        paisOrigen: form.origenNombre.trim(),
+        activo: true
+      });
+
+      creatorsResult.push({
+        id: getId(createdCreator),
+        nombre: createdCreator.nombre || cleanAuthorName
+      });
+    }
+
+    if (creatorsResult.length > 0) {
+      await refreshCreators?.();
+    }
+
+    return creatorsResult;
+  };
+
   const buildPayload = async () => {
-    const categoryName = form.categoriaNombre.trim() || "Manhwa";
-    const originName = form.origenNombre.trim() || "Corea";
+    const category = await ensureCategoryExists();
+    const origin = await ensureOriginExists();
+    const creatorsData = await ensureCreatorsExist();
+
+    const categoryName = category.nombre || form.categoriaNombre.trim();
+    const originName = origin.nombre || form.origenNombre.trim();
+
+    const creatorIds = creatorsData
+      .map((creator) => creator.id)
+      .filter(isMongoObjectId);
+
+    const creatorsName = creatorsData
+      .map((creator) => creator.nombre)
+      .filter(Boolean);
 
     const payload = {
       nombre: form.nombre.trim(),
       descripcion: form.descripcion.trim(),
 
+      categoriaPrincipal: category.id,
       categoriaPrincipalNombre: categoryName,
       categoriaNombre: categoryName,
 
+      origen: origin.id,
       origenNombre: originName,
       pais: getCountryCodeFromOrigin(originName),
 
       tipo: categoryName,
       genero: form.genero.trim(),
 
-      autor: selectedAuthors.join(", "),
-      creadoresNombre: selectedAuthors,
+      creadores: creatorIds,
+      creadoresNombre: creatorsName,
+      autor: creatorsName.join(", "),
 
       destacada: Boolean(form.destacada),
       activa: Boolean(form.activa),
@@ -663,6 +733,7 @@ function AdminSeriesPage() {
     }
 
     setSaving(true);
+
     setMessage(
       editingSeries
         ? "Guardando cambios de la serie..."
@@ -728,8 +799,9 @@ function AdminSeriesPage() {
             </h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Crea series con categoría, país/origen, género, varios autores y
-              carga real de imágenes. La portada no se mezcla con el carrusel.
+              Crea series con categoría, país/origen, género, varios
+              autores/creadores y carga real de imágenes. La portada no se
+              mezcla con el carrusel.
             </p>
           </div>
 
@@ -772,15 +844,17 @@ function AdminSeriesPage() {
         </div>
       </div>
 
-      {message && (
+      {(message ||
+        seriesLoadError ||
+        categoriesLoadError ||
+        originsLoadError ||
+        creatorsLoadError) && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
-          {message}
-        </div>
-      )}
-
-      {seriesLoadError && (
-        <div className="rounded-[24px] bg-red-50 px-5 py-4 text-sm font-black text-red-600">
-          {seriesLoadError}
+          {message ||
+            seriesLoadError ||
+            categoriesLoadError ||
+            originsLoadError ||
+            creatorsLoadError}
         </div>
       )}
 
@@ -812,6 +886,7 @@ function AdminSeriesPage() {
               ) : (
                 <Save size={18} />
               )}
+
               {saving ? "Guardando..." : "Guardar"}
             </button>
           </div>
@@ -819,6 +894,7 @@ function AdminSeriesPage() {
           <div className="mt-6 grid gap-5 lg:grid-cols-2">
             <label className="grid gap-2 text-sm font-black">
               Nombre de la serie / historia
+
               <input
                 name="nombre"
                 value={form.nombre}
@@ -828,7 +904,7 @@ function AdminSeriesPage() {
               />
             </label>
 
-            <CreatableDropdown
+            <CreatableSelect
               label="Categoría"
               value={form.categoriaNombre}
               onChange={(value) =>
@@ -837,13 +913,16 @@ function AdminSeriesPage() {
                   categoriaNombre: value
                 }))
               }
+              onCreate={handleSimpleCreatableCreate}
               options={categoryOptions}
               placeholder="Busca o escribe una categoría"
-              createLabel={(name) => `Agregar “${name}” a Categoría`}
-              helperText="Ejemplo: Manga, Manhwa, Manhua, Novela o Webtoon."
+              emptyLabel="Sin categoría"
+              emptyCreateLabel="Agregar categoría"
+              createLabel={(name) => `Agregar “${name}” a categorías`}
+              helperText="Ejemplo: Manga, Manhwa, Manhua, Novela o Webtoon. Si no existe, se creará al guardar."
             />
 
-            <CreatableDropdown
+            <CreatableSelect
               label="País / origen"
               value={form.origenNombre}
               onChange={(value) =>
@@ -852,13 +931,16 @@ function AdminSeriesPage() {
                   origenNombre: value
                 }))
               }
-              options={countryOptions}
+              onCreate={handleSimpleCreatableCreate}
+              options={originOptions}
               placeholder="Busca o escribe un país/origen"
-              createLabel={(name) => `Agregar “${name}” a País`}
-              helperText="Si no es China, Corea, Japón o Variado, escribe otro país/origen y agrégalo."
+              emptyLabel="Sin país/origen"
+              emptyCreateLabel="Agregar país/origen"
+              createLabel={(name) => `Agregar “${name}” a países/orígenes`}
+              helperText="Si no es China, Corea, Japón o Variado, escribe otro país/origen y se guardará al crear la serie."
             />
 
-            <CreatableDropdown
+            <CreatableSelect
               label="Género"
               value={form.genero}
               onChange={(value) =>
@@ -867,14 +949,18 @@ function AdminSeriesPage() {
                   genero: value
                 }))
               }
+              onCreate={handleSimpleCreatableCreate}
               options={genreOptions}
               placeholder="Busca o escribe un género"
-              createLabel={(name) => `Agregar “${name}” a Género`}
+              emptyLabel="Sin género"
+              emptyCreateLabel="Agregar género"
+              createLabel={(name) => `Agregar “${name}” a géneros`}
               helperText="Ejemplo: BL, romance, fantasía, drama o isekai."
             />
 
             <label className="grid gap-2 text-sm font-black">
               Orden
+
               <input
                 name="orden"
                 type="number"
@@ -888,6 +974,7 @@ function AdminSeriesPage() {
             <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4">
               <label className="flex items-center justify-between gap-4 text-sm font-black">
                 Destacada
+
                 <input
                   type="checkbox"
                   name="destacada"
@@ -899,6 +986,7 @@ function AdminSeriesPage() {
 
               <label className="flex items-center justify-between gap-4 text-sm font-black">
                 Activa
+
                 <input
                   type="checkbox"
                   name="activa"
@@ -909,16 +997,26 @@ function AdminSeriesPage() {
               </label>
             </div>
 
-            <AuthorSelector
-              authorDraft={authorDraft}
-              setAuthorDraft={setAuthorDraft}
-              selectedAuthors={selectedAuthors}
-              setSelectedAuthors={setSelectedAuthors}
-              authorOptions={authorOptions}
-            />
+            <div className="lg:col-span-2">
+              <MultiCreatableSelect
+                label="Autores / creadores"
+                values={selectedAuthors}
+                onChange={setSelectedAuthors}
+                onCreate={handleSimpleCreatableCreate}
+                options={authorOptions}
+                placeholder="Busca o escribe un autor/creador"
+                emptyLabel="Sin autores/creadores"
+                emptyCreateLabel="Agregar autor/creador"
+                createLabel={(name) =>
+                  `Agregar “${name}” a autores/creadores`
+                }
+                helperText="Una serie puede tener más de un autor/creador. Si no existe, se creará al guardar la serie."
+              />
+            </div>
 
             <label className="grid gap-2 text-sm font-black lg:col-span-2">
               Descripción
+
               <textarea
                 name="descripcion"
                 value={form.descripcion}

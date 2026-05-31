@@ -13,14 +13,14 @@ import {
 
 import AutoCarousel from "../../components/common/AutoCarousel";
 import ImageDropzone from "../../components/admin/ImageDropzone";
+import CreatableSelect from "../../components/admin/CreatableSelect";
+import MultiCreatableSelect from "../../components/admin/MultiCreatableSelect";
 import { useAdminData } from "../../context/AdminDataContext";
 
 const initialForm = {
   titulo: "",
   descripcion: "",
-  categoria: "",
   categoriaNombre: "Eventos",
-  origen: "",
   origenNombre: "Variado",
   pais: "V",
   tipoEvento: "Otro",
@@ -29,7 +29,6 @@ const initialForm = {
   estado: "proximo",
   destacado: false,
   activo: true,
-  series: [],
   seriesNombre: [],
   productos: []
 };
@@ -57,10 +56,28 @@ const eventStatusOptions = [
   }
 ];
 
-const eventTypeOptions = ["Lebom", "Café", "Fantazit", "Otro"];
+const baseEventTypes = ["Lebom", "Café", "Fantazit", "Otro"];
+const baseEventCategories = ["Eventos", "Preventa", "Cronograma", "Campaña"];
+const baseOrigins = ["China", "Corea", "Japón", "Variado"];
 
 function getId(item) {
-  return item?._id || item?.id || "";
+  if (!item) return "";
+
+  if (typeof item === "string") return item;
+
+  return item._id || item.id || "";
+}
+
+function getName(item, fallback = "") {
+  if (!item) return fallback;
+
+  if (typeof item === "string") return item;
+
+  return item.nombre || item.titulo || item.name || fallback;
+}
+
+function isMongoObjectId(value) {
+  return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
 }
 
 function normalizeText(text = "") {
@@ -70,6 +87,22 @@ function normalizeText(text = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function uniqueTexts(values = []) {
+  return values.reduce((accumulator, value) => {
+    const cleanValue = value?.toString().trim();
+
+    if (!cleanValue) return accumulator;
+
+    const exists = accumulator.some(
+      (item) => normalizeText(item) === normalizeText(cleanValue)
+    );
+
+    if (!exists) accumulator.push(cleanValue);
+
+    return accumulator;
+  }, []);
 }
 
 function getImageSource(image) {
@@ -217,36 +250,116 @@ function getCountryCodeFromOrigin(originName = "") {
   return originName.trim() || "V";
 }
 
-function buildUniqueOptions(items = []) {
-  const map = new Map();
+function buildOption(item) {
+  if (typeof item === "string") {
+    return {
+      id: item,
+      nombre: item
+    };
+  }
 
-  items.forEach((item) => {
-    const id = item.id || item.value || "";
-    const label = item.label || "";
-
-    if (!label) return;
-
-    const key = normalizeText(label);
-
-    if (!map.has(key)) {
-      map.set(key, {
-        id,
-        label,
-        value: id || label
-      });
-    }
-  });
-
-  return [...map.values()].sort((a, b) => a.label.localeCompare(b.label));
+  return {
+    ...item,
+    id: getId(item) || getName(item),
+    nombre: getName(item, "Sin nombre")
+  };
 }
 
-function EventMultiSelect({
+function buildOptionsFromNames(names = [], realItems = []) {
+  const uniqueNames = uniqueTexts(names);
+
+  return uniqueNames
+    .map((name) => {
+      const realItem = realItems.find(
+        (item) => normalizeText(getName(item)) === normalizeText(name)
+      );
+
+      if (realItem) return buildOption(realItem);
+
+      return {
+        id: name,
+        nombre: name
+      };
+    })
+    .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+}
+
+function getOptionByName(options = [], name = "") {
+  return options.find(
+    (option) => normalizeText(option.nombre) === normalizeText(name)
+  );
+}
+
+function getEventTitle(event) {
+  return event?.titulo || event?.nombre || "Evento Smika";
+}
+
+function getEventSeriesNames(event) {
+  const fromSeriesNombre = Array.isArray(event?.seriesNombre)
+    ? event.seriesNombre
+    : [];
+
+  const fromSeriesObjects = Array.isArray(event?.series)
+    ? event.series
+        .map((serie) => {
+          if (typeof serie === "string") return "";
+          return getName(serie);
+        })
+        .filter(Boolean)
+    : [];
+
+  const legacySerie = event?.serieNombre || event?.serie || "";
+
+  return uniqueTexts([
+    ...fromSeriesNombre,
+    ...fromSeriesObjects,
+    legacySerie
+  ]);
+}
+
+function getEventProductIds(event) {
+  if (!Array.isArray(event?.productos)) return [];
+
+  return event.productos
+    .map((product) => {
+      if (typeof product === "string") return product;
+      return getId(product);
+    })
+    .filter(Boolean);
+}
+
+function getCoverImageFromEvent(event) {
+  return getImageSource(event?.imagen);
+}
+
+function getAdditionalImagesFromEvent(event) {
+  const coverImage = getCoverImageFromEvent(event);
+
+  const images = Array.isArray(event?.imagenes)
+    ? event.imagenes.map(getImageSource).filter(Boolean)
+    : [];
+
+  return images.filter((image) => image !== coverImage);
+}
+
+function getProductExtraLabel(product) {
+  const seriesName = product?.serieNombre || product?.serie || "";
+  const typeName = product?.tipoProducto || product?.tipo || "";
+  const price = product?.precioReferencial ?? product?.precio ?? product?.price;
+
+  const details = [seriesName, typeName, price ? `S/ ${price}` : ""].filter(
+    Boolean
+  );
+
+  return details.length > 0 ? details.join(" · ") : "";
+}
+
+function ProductMultiSelect({
   title,
   description,
   options,
   selectedIds,
   onChange,
-  getLabel,
   emptyText = "No hay opciones disponibles."
 }) {
   const [search, setSearch] = useState("");
@@ -256,10 +369,13 @@ function EventMultiSelect({
 
     if (!cleanSearch) return options;
 
-    return options.filter((item) =>
-      normalizeText(getLabel(item)).includes(cleanSearch)
-    );
-  }, [options, search, getLabel]);
+    return options.filter((item) => {
+      const name = item.nombre || item.titulo || "";
+      const extra = getProductExtraLabel(item);
+
+      return normalizeText(`${name} ${extra}`).includes(cleanSearch);
+    });
+  }, [options, search]);
 
   const toggleOption = (id) => {
     onChange((currentIds) => {
@@ -276,16 +392,14 @@ function EventMultiSelect({
       <p className="font-black">{title}</p>
 
       {description && (
-        <p className="mt-1 text-sm text-gray-600 leading-6">
-          {description}
-        </p>
+        <p className="mt-1 text-sm text-gray-600 leading-6">{description}</p>
       )}
 
       <input
         value={search}
         onChange={(event) => setSearch(event.target.value)}
         className="mt-4 w-full rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3 outline-none"
-        placeholder="Buscar..."
+        placeholder="Buscar producto..."
       />
 
       <div className="mt-4 max-h-72 overflow-auto rounded-2xl bg-white p-3">
@@ -293,33 +407,42 @@ function EventMultiSelect({
           filteredOptions.map((item) => {
             const id = getId(item);
             const checked = selectedIds.includes(id);
+            const extra = getProductExtraLabel(item);
 
             return (
               <label
                 key={id}
-                className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold hover:bg-[#F7D9D8]/50"
+                className="flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2 text-sm font-bold hover:bg-[#F7D9D8]/50"
               >
                 <input
                   type="checkbox"
                   checked={checked}
                   onChange={() => toggleOption(id)}
-                  className="h-4 w-4"
+                  className="mt-1 h-4 w-4"
                 />
 
-                <span>{getLabel(item)}</span>
+                <span>
+                  <span className="block">
+                    {item.nombre || item.titulo || "Producto sin nombre"}
+                  </span>
+
+                  {extra && (
+                    <span className="mt-1 block text-xs text-gray-500">
+                      {extra}
+                    </span>
+                  )}
+                </span>
               </label>
             );
           })
         ) : (
-          <p className="px-3 py-4 text-sm text-gray-500">
-            {emptyText}
-          </p>
+          <p className="px-3 py-4 text-sm text-gray-500">{emptyText}</p>
         )}
       </div>
 
       {selectedIds.length > 0 && (
         <p className="mt-3 text-xs font-black text-[#87CCC8]">
-          Seleccionados: {selectedIds.length}
+          Productos seleccionados: {selectedIds.length}
         </p>
       )}
     </div>
@@ -333,12 +456,25 @@ function AdminEventsPage() {
     products,
     categories,
     origins,
+
     loadingEvents,
     eventsLoadError,
+    categoriesLoadError,
+    originsLoadError,
+    seriesLoadError,
+
     refreshEvents,
+    refreshCategories,
+    refreshOrigins,
+    refreshSeries,
+
     createEventFull,
     updateEventFull,
-    toggleEventStatus
+    toggleEventStatus,
+
+    createCategoryFull,
+    createOriginFull,
+    createSeriesFull
   } = useAdminData();
 
   const [view, setView] = useState("list");
@@ -388,42 +524,72 @@ function AdminEventsPage() {
   }, [origins]);
 
   const categoryOptions = useMemo(() => {
-    return buildUniqueOptions([
-      {
-        id: "",
-        label: "Eventos"
-      },
-      ...activeCategories.map((category) => ({
-        id: getId(category),
-        label: category.nombre
-      }))
-    ]);
-  }, [activeCategories]);
+    const dynamicCategories = (events || []).map(
+      (event) => event.categoriaNombre || event.categoria
+    );
+
+    return buildOptionsFromNames(
+      [
+        ...baseEventCategories,
+        ...activeCategories.map(getName),
+        ...dynamicCategories
+      ],
+      activeCategories
+    );
+  }, [events, activeCategories]);
 
   const originOptions = useMemo(() => {
-    return buildUniqueOptions([
-      {
-        id: "",
-        label: "China"
-      },
-      {
-        id: "",
-        label: "Corea"
-      },
-      {
-        id: "",
-        label: "Japón"
-      },
-      {
-        id: "",
-        label: "Variado"
-      },
-      ...activeOrigins.map((origin) => ({
-        id: getId(origin),
-        label: origin.nombre
-      }))
+    const dynamicOrigins = (events || []).flatMap((event) => [
+      event.origenNombre,
+      event.pais
     ]);
-  }, [activeOrigins]);
+
+    return buildOptionsFromNames(
+      [...baseOrigins, ...activeOrigins.map(getName), ...dynamicOrigins],
+      activeOrigins
+    );
+  }, [events, activeOrigins]);
+
+  const eventTypeSelectOptions = useMemo(() => {
+    const dynamicTypes = (events || []).flatMap((event) => [
+      event.tipoEvento,
+      event.tipo
+    ]);
+
+    return uniqueTexts([...baseEventTypes, ...dynamicTypes]).map((type) => ({
+      id: type,
+      nombre: type
+    }));
+  }, [events]);
+
+  const seriesOptions = useMemo(() => {
+    return buildOptionsFromNames(
+      activeSeries.map((serie) => serie.nombre),
+      activeSeries
+    );
+  }, [activeSeries]);
+
+  const coverPreviewImages = useMemo(() => {
+    return coverImages.map(getImageSource).filter(Boolean);
+  }, [coverImages]);
+
+  const carouselPreviewImages = useMemo(() => {
+    return carouselImages.map(getImageSource).filter(Boolean);
+  }, [carouselImages]);
+
+  const setCoverImagesTouched = (updater) => {
+    setImagesTouched(true);
+    setCoverImages((currentImages) =>
+      typeof updater === "function" ? updater(currentImages) : updater
+    );
+  };
+
+  const setCarouselImagesTouched = (updater) => {
+    setImagesTouched(true);
+    setCarouselImages((currentImages) =>
+      typeof updater === "function" ? updater(currentImages) : updater
+    );
+  };
 
   const resetForm = () => {
     setView("list");
@@ -446,63 +612,15 @@ function AdminEventsPage() {
   };
 
   const openEditForm = (event) => {
-    const eventSeriesIds = Array.isArray(event.series)
-      ? event.series
-          .map((serie) => {
-            if (typeof serie === "string") return serie;
-            return getId(serie);
-          })
-          .filter(Boolean)
-      : [];
-
-    const eventProductsIds = Array.isArray(event.productos)
-      ? event.productos
-          .map((product) => {
-            if (typeof product === "string") return product;
-            return getId(product);
-          })
-          .filter(Boolean)
-      : [];
-
-    const matchedSeriesIdsFromNames = Array.isArray(event.seriesNombre)
-      ? activeSeries
-          .filter((serie) =>
-            event.seriesNombre.some(
-              (name) => normalizeText(name) === normalizeText(serie.nombre)
-            )
-          )
-          .map(getId)
-      : [];
-
-    const finalSeriesIds = [
-      ...new Set([...eventSeriesIds, ...matchedSeriesIdsFromNames].filter(Boolean))
-    ];
-
-    const coverImage = getImageSource(event.imagen);
-    const carouselSources = Array.isArray(event.imagenes)
-      ? event.imagenes.map(getImageSource).filter(Boolean)
-      : [];
-
-    const categoryId =
-      typeof event.categoria === "string" &&
-      activeCategories.some((category) => getId(category) === event.categoria)
-        ? event.categoria
-        : "";
-
-    const originId =
-      typeof event.origen === "string" &&
-      activeOrigins.some((origin) => getId(origin) === event.origen)
-        ? event.origen
-        : "";
+    const coverImage = getCoverImageFromEvent(event);
+    const additionalImages = getAdditionalImagesFromEvent(event);
 
     setEditingEvent(event);
 
     setForm({
-      titulo: event.titulo || event.nombre || "",
+      titulo: getEventTitle(event),
       descripcion: event.descripcion || "",
-      categoria: categoryId,
       categoriaNombre: event.categoriaNombre || "Eventos",
-      origen: originId,
       origenNombre: event.origenNombre || "Variado",
       pais: event.pais || getCountryCodeFromOrigin(event.origenNombre || "Variado"),
       tipoEvento: event.tipoEvento || event.tipo || "Otro",
@@ -511,41 +629,23 @@ function AdminEventsPage() {
       estado: event.estado || "proximo",
       destacado: Boolean(event.destacado),
       activo: event.activo !== false,
-      series: finalSeriesIds,
-      seriesNombre: Array.isArray(event.seriesNombre)
-        ? event.seriesNombre.filter(Boolean)
-        : [],
-      productos: eventProductsIds
+      seriesNombre: getEventSeriesNames(event),
+      productos: getEventProductIds(event)
     });
 
     setCoverImages(
-      coverImage ? [createEditableImageFromSource(coverImage, 0)].filter(Boolean) : []
+      coverImage ? [createEditableImageFromSource(coverImage, 0)] : []
     );
 
     setCarouselImages(
-      carouselSources
-        .filter((image) => image !== coverImage)
-        .map((image, index) => createEditableImageFromSource(image, index))
-        .filter(Boolean)
+      additionalImages.map((image, index) =>
+        createEditableImageFromSource(image, index + 1)
+      )
     );
 
     setImagesTouched(false);
     setMessage("");
     setView("form");
-  };
-
-  const setCoverImagesTouched = (updater) => {
-    setImagesTouched(true);
-    setCoverImages((currentImages) =>
-      typeof updater === "function" ? updater(currentImages) : updater
-    );
-  };
-
-  const setCarouselImagesTouched = (updater) => {
-    setImagesTouched(true);
-    setCarouselImages((currentImages) =>
-      typeof updater === "function" ? updater(currentImages) : updater
-    );
   };
 
   const handleChange = (event) => {
@@ -557,79 +657,196 @@ function AdminEventsPage() {
     }));
   };
 
-  const handleCategoryChange = (event) => {
-    const value = event.target.value;
+  const handleSimpleCreatableCreate = (name) => ({
+    id: `temp-${Date.now()}-${name}`,
+    nombre: name
+  });
 
-    const selectedCategory = activeCategories.find(
-      (category) => getId(category) === value
+  const ensureCategoryExists = async () => {
+    const categoryName = form.categoriaNombre.trim();
+
+    if (!categoryName) {
+      throw new Error("Selecciona o crea una categoría para el evento.");
+    }
+
+    const existingOption = getOptionByName(categoryOptions, categoryName);
+
+    if (existingOption && isMongoObjectId(existingOption.id)) {
+      return {
+        id: existingOption.id,
+        nombre: existingOption.nombre
+      };
+    }
+
+    const existingCategory = activeCategories.find(
+      (category) => normalizeText(category.nombre) === normalizeText(categoryName)
     );
 
-    if (selectedCategory) {
-      setForm((currentForm) => ({
-        ...currentForm,
-        categoria: getId(selectedCategory),
-        categoriaNombre: selectedCategory.nombre
-      }));
-
-      return;
+    if (existingCategory) {
+      return {
+        id: getId(existingCategory),
+        nombre: existingCategory.nombre
+      };
     }
 
-    setForm((currentForm) => ({
-      ...currentForm,
-      categoria: "",
-      categoriaNombre: value
-    }));
+    if (!createCategoryFull) {
+      return {
+        id: "",
+        nombre: categoryName
+      };
+    }
+
+    const createdCategory = await createCategoryFull({
+      nombre: categoryName,
+      descripcion: "Categoría creada rápidamente desde eventos.",
+      tipo: "principal",
+      orden: 0,
+      activa: true
+    });
+
+    await refreshCategories?.();
+
+    return {
+      id: getId(createdCategory),
+      nombre: createdCategory.nombre || categoryName
+    };
   };
 
-  const handleOriginChange = (event) => {
-    const value = event.target.value;
+  const ensureOriginExists = async () => {
+    const originName = form.origenNombre.trim() || "Variado";
 
-    const selectedOrigin = activeOrigins.find((origin) => getId(origin) === value);
+    const existingOption = getOptionByName(originOptions, originName);
 
-    if (selectedOrigin) {
-      setForm((currentForm) => ({
-        ...currentForm,
-        origen: getId(selectedOrigin),
-        origenNombre: selectedOrigin.nombre,
-        pais: getCountryCodeFromOrigin(selectedOrigin.nombre)
-      }));
-
-      return;
+    if (existingOption && isMongoObjectId(existingOption.id)) {
+      return {
+        id: existingOption.id,
+        nombre: existingOption.nombre
+      };
     }
 
-    setForm((currentForm) => ({
-      ...currentForm,
-      origen: "",
-      origenNombre: value,
-      pais: getCountryCodeFromOrigin(value)
-    }));
+    const existingOrigin = activeOrigins.find(
+      (origin) => normalizeText(origin.nombre) === normalizeText(originName)
+    );
+
+    if (existingOrigin) {
+      return {
+        id: getId(existingOrigin),
+        nombre: existingOrigin.nombre
+      };
+    }
+
+    if (!createOriginFull) {
+      return {
+        id: "",
+        nombre: originName
+      };
+    }
+
+    const createdOrigin = await createOriginFull({
+      nombre: originName,
+      descripcion: "País/origen creado rápidamente desde eventos.",
+      activo: true
+    });
+
+    await refreshOrigins?.();
+
+    return {
+      id: getId(createdOrigin),
+      nombre: createdOrigin.nombre || originName
+    };
+  };
+
+  const ensureSeriesExist = async ({ category, origin }) => {
+    const selectedNames = uniqueTexts(form.seriesNombre);
+
+    const result = [];
+
+    for (const seriesName of selectedNames) {
+      const existingSeries = activeSeries.find(
+        (serie) => normalizeText(serie.nombre) === normalizeText(seriesName)
+      );
+
+      if (existingSeries) {
+        result.push({
+          id: getId(existingSeries),
+          nombre: existingSeries.nombre
+        });
+
+        continue;
+      }
+
+      if (!createSeriesFull) {
+        result.push({
+          id: "",
+          nombre: seriesName
+        });
+
+        continue;
+      }
+
+      const createdSeries = await createSeriesFull({
+        nombre: seriesName,
+        descripcion: "Serie creada rápidamente desde eventos.",
+        categoriaPrincipal: category.id || "",
+        categoriaPrincipalNombre: category.nombre || "Series",
+        categoriaNombre: category.nombre || "Series",
+        origen: origin.id || "",
+        origenNombre: origin.nombre || "Variado",
+        pais: getCountryCodeFromOrigin(origin.nombre || "Variado"),
+        tipo: category.nombre || "Historia",
+        genero: "",
+        creadoresNombre: [],
+        destacada: false,
+        activa: true,
+        activo: true,
+        orden: 0
+      });
+
+      result.push({
+        id: getId(createdSeries),
+        nombre: createdSeries.nombre || seriesName
+      });
+    }
+
+    if (result.length > 0) {
+      await refreshSeries?.();
+    }
+
+    return result;
   };
 
   const buildPayload = async () => {
-    const selectedSeries = form.series
-      .map((seriesId) => activeSeries.find((serie) => getId(serie) === seriesId))
-      .filter(Boolean);
+    const category = await ensureCategoryExists();
+    const origin = await ensureOriginExists();
+    const selectedSeries = await ensureSeriesExist({
+      category,
+      origin
+    });
 
-    const selectedSeriesNames = [
-      ...new Set([
-        ...selectedSeries.map((serie) => serie.nombre).filter(Boolean),
-        ...form.seriesNombre.filter(Boolean)
-      ])
-    ];
+    const seriesIds = selectedSeries
+      .map((serie) => serie.id)
+      .filter(isMongoObjectId);
+
+    const seriesNames = selectedSeries
+      .map((serie) => serie.nombre)
+      .filter(Boolean);
 
     const payload = {
       titulo: form.titulo.trim(),
       nombre: form.titulo.trim(),
       descripcion: form.descripcion.trim(),
 
-      categoria: form.categoria,
-      categoriaNombre: form.categoriaNombre || "Eventos",
+      categoria: category.id,
+      categoriaNombre: category.nombre || form.categoriaNombre.trim(),
 
-      origen: form.origen,
-      origenNombre: form.origenNombre || "Variado",
-      pais: form.pais || getCountryCodeFromOrigin(form.origenNombre || "Variado"),
+      origen: origin.id,
+      origenNombre: origin.nombre || form.origenNombre.trim(),
+      pais:
+        form.pais ||
+        getCountryCodeFromOrigin(origin.nombre || form.origenNombre || "Variado"),
 
       tipoEvento: form.tipoEvento || "Otro",
+      tipo: form.tipoEvento || "Otro",
 
       fechaInicio: form.fechaInicio || null,
       fechaFin: form.fechaFin || null,
@@ -638,10 +855,13 @@ function AdminEventsPage() {
       destacado: Boolean(form.destacado),
       activo: Boolean(form.activo),
 
-      series: form.series,
-      seriesNombre: selectedSeriesNames,
+      serie: seriesIds[0] || "",
+      serieNombre: seriesNames[0] || "",
 
-      productos: form.productos
+      series: seriesIds,
+      seriesNombre: seriesNames,
+
+      productos: form.productos.filter(isMongoObjectId)
     };
 
     if (!editingEvent || imagesTouched) {
@@ -670,11 +890,27 @@ function AdminEventsPage() {
     }
 
     if (!form.categoriaNombre.trim()) {
-      setMessage("Selecciona o escribe una categoría del evento.");
+      setMessage("Selecciona o crea una categoría del evento.");
+      return;
+    }
+
+    if (!form.origenNombre.trim()) {
+      setMessage("Selecciona o crea un país/origen.");
+      return;
+    }
+
+    if (!form.tipoEvento.trim()) {
+      setMessage("Selecciona o crea un tipo de evento.");
+      return;
+    }
+
+    if (!editingEvent && coverImages.length === 0) {
+      setMessage("Sube una portada para el evento.");
       return;
     }
 
     setSaving(true);
+
     setMessage(
       editingEvent
         ? "Guardando cambios del evento..."
@@ -738,9 +974,8 @@ function AdminEventsPage() {
             <h2 className="text-4xl font-black">Gestión de eventos</h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Crea y edita eventos reales de Smika Store. Aquí se configuran
-              portada, carrusel, fechas, estado, series vinculadas y productos
-              asociados al evento.
+              Crea y edita eventos reales de Smika Store. Un evento puede tener
+              muchas series y muchos productos vinculados.
             </p>
           </div>
 
@@ -783,9 +1018,17 @@ function AdminEventsPage() {
         </div>
       </div>
 
-      {(message || eventsLoadError) && (
+      {(message ||
+        eventsLoadError ||
+        categoriesLoadError ||
+        originsLoadError ||
+        seriesLoadError) && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
-          {message || eventsLoadError}
+          {message ||
+            eventsLoadError ||
+            categoriesLoadError ||
+            originsLoadError ||
+            seriesLoadError}
         </div>
       )}
 
@@ -822,6 +1065,7 @@ function AdminEventsPage() {
           <div className="mt-6 grid gap-5 lg:grid-cols-2">
             <label className="grid gap-2 text-sm font-black">
               Título del evento
+
               <input
                 name="titulo"
                 value={form.titulo}
@@ -831,54 +1075,64 @@ function AdminEventsPage() {
               />
             </label>
 
-            <label className="grid gap-2 text-sm font-black">
-              Tipo de evento
-              <select
-                name="tipoEvento"
-                value={form.tipoEvento}
-                onChange={handleChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-              >
-                {eventTypeOptions.map((option) => (
-                  <option key={option} value={option}>
-                    {option}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CreatableSelect
+              label="Tipo de evento"
+              value={form.tipoEvento}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  tipoEvento: value
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={eventTypeSelectOptions}
+              placeholder="Lebom, Café, Fantazit..."
+              emptyLabel="Sin tipo de evento"
+              emptyCreateLabel="Agregar tipo de evento"
+              createLabel={(name) => `Agregar “${name}” a tipo de evento`}
+              helperText="Ejemplo: Café Lebom, Fantazit u otro tipo de evento."
+            />
 
-            <label className="grid gap-2 text-sm font-black">
-              Categoría
-              <select
-                value={form.categoria || form.categoriaNombre}
-                onChange={handleCategoryChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-              >
-                {categoryOptions.map((option) => (
-                  <option key={`${option.value}-${option.label}`} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CreatableSelect
+              label="Categoría del evento"
+              value={form.categoriaNombre}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  categoriaNombre: value
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={categoryOptions}
+              placeholder="Eventos, preventa, campaña..."
+              emptyLabel="Sin categoría"
+              emptyCreateLabel="Agregar categoría"
+              createLabel={(name) => `Agregar “${name}” a categorías`}
+              helperText="Si la categoría no existe, se creará al guardar el evento."
+            />
 
-            <label className="grid gap-2 text-sm font-black">
-              Origen / País
-              <select
-                value={form.origen || form.origenNombre}
-                onChange={handleOriginChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-              >
-                {originOptions.map((option) => (
-                  <option key={`${option.value}-${option.label}`} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CreatableSelect
+              label="Origen / País"
+              value={form.origenNombre}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  origenNombre: value,
+                  pais: getCountryCodeFromOrigin(value)
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={originOptions}
+              placeholder="China, Corea, Japón, Variado..."
+              emptyLabel="Sin origen"
+              emptyCreateLabel="Agregar país/origen"
+              createLabel={(name) => `Agregar “${name}” a países/orígenes`}
+              helperText="Si el país/origen no existe, se creará al guardar el evento."
+            />
 
             <label className="grid gap-2 text-sm font-black">
               Fecha inicio
+
               <input
                 type="date"
                 name="fechaInicio"
@@ -890,6 +1144,7 @@ function AdminEventsPage() {
 
             <label className="grid gap-2 text-sm font-black">
               Fecha fin
+
               <input
                 type="date"
                 name="fechaFin"
@@ -901,6 +1156,7 @@ function AdminEventsPage() {
 
             <label className="grid gap-2 text-sm font-black">
               Estado
+
               <select
                 name="estado"
                 value={form.estado}
@@ -918,6 +1174,7 @@ function AdminEventsPage() {
             <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4">
               <label className="flex items-center justify-between gap-4 text-sm font-black">
                 Evento destacado
+
                 <input
                   type="checkbox"
                   name="destacado"
@@ -929,6 +1186,7 @@ function AdminEventsPage() {
 
               <label className="flex items-center justify-between gap-4 text-sm font-black">
                 Evento activo
+
                 <input
                   type="checkbox"
                   name="activo"
@@ -941,6 +1199,7 @@ function AdminEventsPage() {
 
             <label className="grid gap-2 text-sm font-black lg:col-span-2">
               Descripción del evento
+
               <textarea
                 name="descripcion"
                 value={form.descripcion}
@@ -952,29 +1211,29 @@ function AdminEventsPage() {
             </label>
 
             <div className="lg:col-span-2">
-              <EventMultiSelect
-                title="Series / Historias vinculadas"
-                description="Selecciona las series o historias relacionadas a este evento."
-                options={activeSeries}
-                selectedIds={form.series}
-                onChange={(updater) =>
+              <MultiCreatableSelect
+                label="Series / historias vinculadas"
+                values={form.seriesNombre}
+                onChange={(values) =>
                   setForm((currentForm) => ({
                     ...currentForm,
-                    series:
-                      typeof updater === "function"
-                        ? updater(currentForm.series)
-                        : updater
+                    seriesNombre: values
                   }))
                 }
-                getLabel={(serie) => serie.nombre || "Serie sin nombre"}
-                emptyText="Todavía no hay series registradas."
+                onCreate={handleSimpleCreatableCreate}
+                options={seriesOptions}
+                placeholder="Busca o escribe una serie"
+                emptyLabel="Sin series vinculadas"
+                emptyCreateLabel="Agregar serie"
+                createLabel={(name) => `Agregar “${name}” a series del evento`}
+                helperText="Un evento puede tener muchas series. Si escribes una serie que no existe, se creará al guardar el evento."
               />
             </div>
 
             <div className="lg:col-span-2">
-              <EventMultiSelect
+              <ProductMultiSelect
                 title="Productos vinculados al evento"
-                description="Selecciona productos existentes para mostrarlos dentro del detalle del evento."
+                description="Selecciona productos existentes para mostrarlos dentro del detalle público del evento."
                 options={activeProducts}
                 selectedIds={form.productos}
                 onChange={(updater) =>
@@ -985,11 +1244,6 @@ function AdminEventsPage() {
                         ? updater(currentForm.productos)
                         : updater
                   }))
-                }
-                getLabel={(product) =>
-                  `${product.nombre || "Producto"}${
-                    product.serie ? ` · ${product.serie}` : ""
-                  }`
                 }
                 emptyText="Todavía no hay productos registrados."
               />
@@ -1032,6 +1286,40 @@ function AdminEventsPage() {
                 />
               </div>
             </div>
+
+            <div className="lg:col-span-2 grid gap-5 lg:grid-cols-2">
+              <div className="rounded-[28px] bg-[#F8F6F7] p-5">
+                <p className="font-black">Vista previa de portada</p>
+
+                <div className="mt-4 h-72 overflow-hidden rounded-[28px] bg-white">
+                  {coverPreviewImages.length > 0 ? (
+                    <img
+                      src={coverPreviewImages[0]}
+                      alt={`${form.titulo || "Evento Smika"} portada`}
+                      className="h-full w-full object-contain"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-gray-400">
+                      <ImageIcon size={38} />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rounded-[28px] bg-[#F8F6F7] p-5">
+                <p className="font-black">Vista previa del carrusel</p>
+
+                <div className="mt-4">
+                  <AutoCarousel
+                    images={carouselPreviewImages}
+                    alt={`${form.titulo || "Evento Smika"} carrusel`}
+                    heightClassName="h-72"
+                    fit="contain"
+                    showEmpty
+                  />
+                </div>
+              </div>
+            </div>
           </div>
         </form>
       )}
@@ -1044,6 +1332,7 @@ function AdminEventsPage() {
                 size={42}
                 className="mx-auto animate-spin text-[#87CCC8]"
               />
+
               <p className="mt-4 font-black">Cargando eventos...</p>
             </div>
           ) : sortedEvents.length === 0 ? (
@@ -1051,7 +1340,7 @@ function AdminEventsPage() {
               <CalendarDays size={42} className="mx-auto text-[#D1B0C7]" />
 
               <h3 className="mt-4 text-2xl font-black">
-                Todavía no hay eventos
+                Todavía no hay eventos registrados
               </h3>
 
               <p className="mt-2 text-gray-600">
@@ -1061,30 +1350,27 @@ function AdminEventsPage() {
           ) : (
             <div className="grid gap-6 xl:grid-cols-3">
               {sortedEvents.map((event) => {
-                const eventId = getId(event);
-                const eventImages = [
-                  getImageSource(event.imagen),
-                  ...(Array.isArray(event.imagenes)
-                    ? event.imagenes.map(getImageSource)
-                    : [])
-                ].filter(Boolean);
+                const coverImage = getCoverImageFromEvent(event);
+                const additionalImages = getAdditionalImagesFromEvent(event);
+                const seriesNames = getEventSeriesNames(event);
+                const eventProductsIds = getEventProductIds(event);
 
                 return (
                   <article
-                    key={eventId}
+                    key={getId(event)}
                     className="rounded-[28px] bg-white border border-[#87CCC8]/20 smika-shadow overflow-hidden"
                   >
-                    <div className="bg-[#F8F6F7]">
-                      {eventImages.length > 0 ? (
-                        <AutoCarousel
-                          images={eventImages}
-                          alt={event.titulo || event.nombre}
-                          heightClassName="h-48"
-                          fit="contain"
+                    <div className="h-44 bg-[#F8F6F7]">
+                      {coverImage ? (
+                        <img
+                          src={coverImage}
+                          alt={getEventTitle(event)}
+                          className="h-full w-full object-contain"
+                          loading="lazy"
                         />
                       ) : (
-                        <div className="flex h-48 items-center justify-center text-gray-400">
-                          <ImageIcon size={38} />
+                        <div className="h-full flex items-center justify-center text-gray-400">
+                          <ImageIcon size={36} />
                         </div>
                       )}
                     </div>
@@ -1092,25 +1378,30 @@ function AdminEventsPage() {
                     <div className="p-6">
                       <div className="flex flex-wrap gap-2">
                         <span className="rounded-full bg-[#F7D9D8] px-3 py-1 text-xs font-black">
-                          {event.activo ? "Activo" : "Inactivo"}
-                        </span>
-
-                        <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
                           {getStatusLabel(event.estado)}
                         </span>
 
+                        <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
+                          {event.activo ? "Activo" : "Inactivo"}
+                        </span>
+
                         {event.destacado && (
-                          <span className="rounded-full bg-[#D1B0C7]/30 px-3 py-1 text-xs font-black">
+                          <span className="rounded-full bg-[#F8F6F7] px-3 py-1 text-xs font-black">
                             Destacado
                           </span>
                         )}
                       </div>
 
                       <h3 className="mt-4 text-xl font-black">
-                        {event.titulo || event.nombre}
+                        {getEventTitle(event)}
                       </h3>
 
                       <div className="mt-3 grid gap-2 text-sm text-gray-600">
+                        <p>
+                          <strong>Tipo:</strong>{" "}
+                          {event.tipoEvento || event.tipo || "Otro"}
+                        </p>
+
                         <p>
                           <strong>Categoría:</strong>{" "}
                           {event.categoriaNombre || "Eventos"}
@@ -1118,12 +1409,7 @@ function AdminEventsPage() {
 
                         <p>
                           <strong>Origen:</strong>{" "}
-                          {event.origenNombre || "Variado"}
-                        </p>
-
-                        <p>
-                          <strong>Tipo:</strong>{" "}
-                          {event.tipoEvento || "Otro"}
+                          {event.origenNombre || event.pais || "Variado"}
                         </p>
 
                         <p>
@@ -1138,17 +1424,19 @@ function AdminEventsPage() {
 
                         <p>
                           <strong>Series:</strong>{" "}
-                          {Array.isArray(event.seriesNombre) &&
-                          event.seriesNombre.length > 0
-                            ? event.seriesNombre.join(", ")
-                            : event.serieNombre || "Sin series"}
+                          {seriesNames.length > 0
+                            ? seriesNames.join(", ")
+                            : "Sin series vinculadas"}
                         </p>
 
                         <p>
                           <strong>Productos vinculados:</strong>{" "}
-                          {Array.isArray(event.productos)
-                            ? event.productos.length
-                            : 0}
+                          {eventProductsIds.length}
+                        </p>
+
+                        <p>
+                          <strong>Imágenes carrusel:</strong>{" "}
+                          {additionalImages.length}
                         </p>
                       </div>
 
