@@ -1,7 +1,11 @@
 const MAX_UPLOAD_SIZE_MB = 40;
-const MAX_OUTPUT_SIZE_KB = 600;
-const MAX_IMAGE_WIDTH = 1600;
-const MAX_IMAGE_HEIGHT = 1600;
+const MAX_OUTPUT_SIZE_KB = 1024;
+const MAX_IMAGE_WIDTH = 2200;
+const MAX_IMAGE_HEIGHT = 2200;
+const MIN_IMAGE_WIDTH = 1200;
+const MIN_IMAGE_HEIGHT = 1200;
+const INITIAL_QUALITY = 0.95;
+const MIN_QUALITY = 0.82;
 
 function bytesToKB(bytes) {
   return bytes / 1024;
@@ -66,8 +70,8 @@ function getResizedDimensions(width, height, maxWidth, maxHeight) {
   }
 
   return {
-    width: newWidth,
-    height: newHeight
+    width: Math.max(1, newWidth),
+    height: Math.max(1, newHeight)
   };
 }
 
@@ -119,10 +123,8 @@ export async function compressImageFile(file) {
     image.naturalHeight <= MAX_IMAGE_HEIGHT;
 
   /*
-    Regla importante:
-    Si la imagen ya pesa menos de 600 KB y no supera dimensiones máximas,
-    NO la recomprimimos. Así evitamos casos como:
-    original 188 KB -> final 239 KB.
+    Si la imagen ya pesa menos de 1 MB y no supera dimensiones máximas,
+    NO la recomprimimos. Esto evita perder calidad o que pese más.
   */
   if (isOriginalSmallEnough && isWithinDimensions) {
     return buildOriginalImageResult(file, image);
@@ -135,10 +137,10 @@ export async function compressImageFile(file) {
     MAX_IMAGE_HEIGHT
   );
 
-  let quality = 0.92;
+  let quality = INITIAL_QUALITY;
   let blob = null;
 
-  for (let attempt = 0; attempt < 14; attempt += 1) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
     const canvas = document.createElement("canvas");
     canvas.width = dimensions.width;
     canvas.height = dimensions.height;
@@ -163,12 +165,12 @@ export async function compressImageFile(file) {
       break;
     }
 
-    if (quality > 0.72) {
-      quality -= 0.05;
+    if (quality > MIN_QUALITY) {
+      quality = Math.max(MIN_QUALITY, quality - 0.03);
     } else {
       dimensions = {
-        width: Math.max(900, Math.round(dimensions.width * 0.9)),
-        height: Math.max(900, Math.round(dimensions.height * 0.9))
+        width: Math.max(MIN_IMAGE_WIDTH, Math.round(dimensions.width * 0.92)),
+        height: Math.max(MIN_IMAGE_HEIGHT, Math.round(dimensions.height * 0.92))
       };
     }
   }
@@ -178,9 +180,8 @@ export async function compressImageFile(file) {
   }
 
   /*
-    Segunda protección:
-    Si la versión procesada queda más pesada que la original,
-    conservamos la original.
+    Protección:
+    Si el resultado termina pesando más que el original, se conserva la original.
   */
   if (blob.size >= file.size) {
     return buildOriginalImageResult(file, image);
