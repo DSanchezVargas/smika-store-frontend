@@ -1,34 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronDown, Loader2, Plus, Search, X } from "lucide-react";
 
-function normalizeText(text = "") {
-  return text
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim();
-}
-
 function normalizeArray(value) {
   if (!Array.isArray(value)) return [];
   return value.filter(Boolean);
-}
-
-function getOptionName(option) {
-  if (!option) return "";
-
-  if (typeof option === "string") return option;
-
-  return option.nombre || option.titulo || option.name || "";
-}
-
-function getOptionId(option) {
-  if (!option) return "";
-
-  if (typeof option === "string") return option;
-
-  return option._id || option.id || option.value || getOptionName(option);
 }
 
 function MultiCreatableSelect({
@@ -45,9 +20,7 @@ function MultiCreatableSelect({
   createLabel,
   emptyCreateLabel = "Agregar nuevo",
   secondaryCreateLabel,
-  onSecondaryCreate,
-  createTargetLabel = "",
-  createContextLabel = ""
+  onSecondaryCreate
 }) {
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
@@ -55,60 +28,54 @@ function MultiCreatableSelect({
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
 
   const selectedValues = normalizeArray(values);
   const cleanSearch = search.trim();
 
-  const normalizedOptions = useMemo(() => {
-    return options
-      .map((option) => ({
-        ...((typeof option === "object" && option !== null) ? option : {}),
-        id: getOptionId(option),
-        nombre: getOptionName(option)
-      }))
-      .filter((option) => option.nombre);
-  }, [options]);
-
   const selectedSet = useMemo(() => {
-    return new Set(selectedValues.map((value) => normalizeText(value)));
+    return new Set(selectedValues.map((value) => value.toLowerCase()));
   }, [selectedValues]);
 
   const filteredOptions = useMemo(() => {
-    const loweredSearch = normalizeText(cleanSearch);
+    const loweredSearch = cleanSearch.toLowerCase();
 
-    return normalizedOptions.filter((option) => {
+    return options.filter((option) => {
       const optionName = option.nombre || "";
 
       if (!optionName) return false;
 
-      if (selectedSet.has(normalizeText(optionName))) return false;
+      if (selectedSet.has(optionName.toLowerCase())) return false;
 
       if (!loweredSearch) return true;
 
-      return normalizeText(optionName).includes(loweredSearch);
+      return optionName.toLowerCase().includes(loweredSearch);
     });
-  }, [normalizedOptions, cleanSearch, selectedSet]);
+  }, [options, cleanSearch, selectedSet]);
 
-  const exactExists = normalizedOptions.some(
-    (option) => normalizeText(option.nombre) === normalizeText(cleanSearch)
+  const exactExists = options.some(
+    (option) => option.nombre?.toLowerCase() === cleanSearch.toLowerCase()
   );
 
   const selectedExactExists = selectedValues.some(
-    (value) => normalizeText(value) === normalizeText(cleanSearch)
+    (value) => value.toLowerCase() === cleanSearch.toLowerCase()
   );
 
-  const canCreate = Boolean(
-    cleanSearch && !exactExists && !selectedExactExists && !disabled
-  );
+  const canCreate = cleanSearch && !exactExists && !selectedExactExists && !disabled;
 
   const closeMenu = () => {
+    if (creating) return;
+
     setOpen(false);
     setSearch("");
+    setCreateError("");
   };
 
   const toggleMenu = () => {
     if (disabled) return;
+
     setOpen((current) => !current);
+    setCreateError("");
   };
 
   const focusInput = () => {
@@ -119,7 +86,7 @@ function MultiCreatableSelect({
     if (!value) return;
 
     const alreadySelected = selectedValues.some(
-      (item) => normalizeText(item) === normalizeText(value)
+      (item) => item.toLowerCase() === value.toLowerCase()
     );
 
     if (alreadySelected) return;
@@ -137,35 +104,30 @@ function MultiCreatableSelect({
     closeMenu();
   };
 
-  const resolveCreatedName = (createdOption, fallbackName) => {
-    if (!createdOption) return fallbackName;
+  const resolveCreatedValue = (createdOption) => {
+    if (!createdOption) return "";
 
     if (typeof createdOption === "string") return createdOption;
 
-    return (
-      createdOption.nombre ||
-      createdOption.titulo ||
-      createdOption.name ||
-      fallbackName
-    );
+    return createdOption.nombre || createdOption.name || createdOption.label || "";
   };
 
   const handleCreate = async () => {
     if (!canCreate || creating) return;
 
     setCreating(true);
+    setCreateError("");
 
     try {
-      let createdOption = null;
+      const createdOption = onCreate ? await onCreate(cleanSearch) : null;
+      const createdValue = resolveCreatedValue(createdOption) || cleanSearch;
 
-      if (onCreate) {
-        createdOption = await onCreate(cleanSearch);
-      }
-
-      const createdName = resolveCreatedName(createdOption, cleanSearch);
-
-      addValue(createdName);
+      addValue(createdValue);
       closeMenu();
+    } catch (error) {
+      setCreateError(
+        error.message || "No se pudo crear este valor. Inténtalo nuevamente."
+      );
     } finally {
       setCreating(false);
     }
@@ -175,30 +137,21 @@ function MultiCreatableSelect({
     if (!canCreate || !onSecondaryCreate || creating) return;
 
     setCreating(true);
+    setCreateError("");
 
     try {
       const createdOption = await onSecondaryCreate(cleanSearch);
-      const createdName = resolveCreatedName(createdOption, cleanSearch);
+      const createdValue = resolveCreatedValue(createdOption) || cleanSearch;
 
-      addValue(createdName);
+      addValue(createdValue);
       closeMenu();
+    } catch (error) {
+      setCreateError(
+        error.message || "No se pudo crear este valor. Inténtalo nuevamente."
+      );
     } finally {
       setCreating(false);
     }
-  };
-
-  const getCreateLabelText = (name) => {
-    if (createLabel) return createLabel(name);
-
-    if (createTargetLabel && createContextLabel) {
-      return `Agregar “${name}” a ${createTargetLabel} de “${createContextLabel}”`;
-    }
-
-    if (createTargetLabel) {
-      return `Agregar “${name}” a ${createTargetLabel}`;
-    }
-
-    return `Agregar “${name}”`;
   };
 
   useEffect(() => {
@@ -223,7 +176,7 @@ function MultiCreatableSelect({
       document.removeEventListener("mousedown", handleClickOutside);
       document.removeEventListener("keydown", handleEscape);
     };
-  }, []);
+  }, [creating]);
 
   return (
     <div ref={wrapperRef} className="relative">
@@ -298,19 +251,29 @@ function MultiCreatableSelect({
             <input
               ref={inputRef}
               value={search}
-              onChange={(event) => setSearch(event.target.value)}
+              onChange={(event) => {
+                setSearch(event.target.value);
+                setCreateError("");
+              }}
               autoFocus
               placeholder={placeholder}
               className="w-full bg-transparent outline-none text-sm"
             />
           </div>
 
+          {createError && (
+            <div className="mt-3 rounded-2xl bg-[#F7D9D8] px-4 py-3 text-sm font-black text-[#2F2F2F]">
+              {createError}
+            </div>
+          )}
+
           <div className="mt-3 max-h-60 overflow-y-auto grid gap-1">
             {selectedValues.length > 0 && (
               <button
                 type="button"
                 onClick={clearValues}
-                className="flex items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-bold hover:bg-[#F8F6F7]"
+                disabled={creating}
+                className="flex items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-bold hover:bg-[#F8F6F7] disabled:opacity-60"
               >
                 {emptyLabel}
                 <Check size={17} className="text-[#87CCC8]" />
@@ -322,7 +285,8 @@ function MultiCreatableSelect({
                 key={option.id || option.nombre}
                 type="button"
                 onClick={() => addValue(option.nombre)}
-                className="flex items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-bold hover:bg-[#F8F6F7]"
+                disabled={creating}
+                className="flex items-center justify-between rounded-2xl px-4 py-3 text-left text-sm font-bold hover:bg-[#F8F6F7] disabled:opacity-60"
               >
                 <span>
                   {option.nombre}
@@ -354,17 +318,12 @@ function MultiCreatableSelect({
               <button
                 type="button"
                 onClick={focusInput}
-                className="mt-2 flex items-center gap-2 rounded-2xl bg-[#F7D9D8] px-4 py-3 text-left text-sm font-black"
+                disabled={creating}
+                className="mt-2 flex items-center gap-2 rounded-2xl bg-[#F7D9D8] px-4 py-3 text-left text-sm font-black disabled:opacity-60"
               >
                 <Plus size={17} />
                 {emptyCreateLabel}
               </button>
-            )}
-
-            {cleanSearch && filteredOptions.length === 0 && !canCreate && (
-              <div className="rounded-2xl bg-[#F8F6F7] px-4 py-3 text-sm font-bold text-gray-500">
-                No hay coincidencias.
-              </div>
             )}
 
             {canCreate && (
@@ -374,12 +333,12 @@ function MultiCreatableSelect({
                 disabled={creating}
                 className="mt-2 flex items-center gap-2 rounded-2xl bg-[#87CCC8] px-4 py-3 text-left text-sm font-black text-white disabled:opacity-60"
               >
-                {creating ? (
-                  <Loader2 size={17} className="animate-spin" />
-                ) : (
-                  <Plus size={17} />
-                )}
-                {getCreateLabelText(cleanSearch)}
+                {creating ? <Loader2 size={17} className="animate-spin" /> : <Plus size={17} />}
+                {creating
+                  ? "Guardando..."
+                  : createLabel
+                  ? createLabel(cleanSearch)
+                  : `Agregar “${cleanSearch}”`}
               </button>
             )}
 
@@ -390,21 +349,18 @@ function MultiCreatableSelect({
                 disabled={creating}
                 className="flex items-center gap-2 rounded-2xl bg-[#F7D9D8] px-4 py-3 text-left text-sm font-black disabled:opacity-60"
               >
-                {creating ? (
-                  <Loader2 size={17} className="animate-spin" />
-                ) : (
-                  <Plus size={17} />
-                )}
-
-                {secondaryCreateLabel
+                {creating ? <Loader2 size={17} className="animate-spin" /> : <Plus size={17} />}
+                {creating
+                  ? "Guardando..."
+                  : secondaryCreateLabel
                   ? secondaryCreateLabel(cleanSearch)
-                  : `Agregar “${cleanSearch}”`}
+                  : `Agregar personaje “${cleanSearch}”`}
               </button>
             )}
 
             {cleanSearch && (exactExists || selectedExactExists) && (
               <div className="mt-2 rounded-2xl bg-[#F8F6F7] px-4 py-3 text-sm font-bold text-gray-500">
-                Ese registro ya existe o ya fue seleccionado.
+                Esa opción ya existe o ya fue seleccionada.
               </div>
             )}
           </div>
@@ -412,7 +368,8 @@ function MultiCreatableSelect({
           <button
             type="button"
             onClick={closeMenu}
-            className="mt-3 w-full rounded-2xl bg-[#F7D9D8] px-4 py-2 text-sm font-black"
+            disabled={creating}
+            className="mt-3 w-full rounded-2xl bg-[#F7D9D8] px-4 py-2 text-sm font-black disabled:opacity-60"
           >
             Cerrar
           </button>

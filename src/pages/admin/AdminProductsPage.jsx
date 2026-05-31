@@ -82,17 +82,6 @@ const disponibilidadOptions = [
   }
 ];
 
-function createSlug(text = "") {
-  return text
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-}
-
 function normalizeText(text = "") {
   return text
     .toString()
@@ -100,96 +89,6 @@ function normalizeText(text = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
-}
-
-function normalizeAvailabilityOption(option) {
-  if (!option) return null;
-
-  if (typeof option === "string") {
-    const cleanName = option.trim();
-
-    if (!cleanName) return null;
-
-    return {
-      id: createSlug(cleanName) || cleanName,
-      nombre: cleanName,
-      value: cleanName,
-      estado: cleanName,
-      custom: true
-    };
-  }
-
-  const nombre = option.nombre || option.label || option.name || option.value || "";
-
-  if (!nombre.toString().trim()) return null;
-
-  return {
-    ...option,
-    id: option.id || option.value || createSlug(nombre) || nombre,
-    nombre: nombre.toString().trim(),
-    value: option.value || nombre.toString().trim(),
-    estado: option.estado || nombre.toString().trim(),
-    custom: Boolean(option.custom)
-  };
-}
-
-function availabilityOptionMatches(option, value = "") {
-  const normalizedValue = normalizeText(value);
-
-  if (!normalizedValue) return false;
-
-  return [option?.nombre, option?.value, option?.estado, option?.id].some(
-    (item) => normalizeText(item || "") === normalizedValue
-  );
-}
-
-function findAvailabilityOption(options = [], value = "") {
-  return options.find((option) => availabilityOptionMatches(option, value));
-}
-
-function createAvailabilityOption(name = "") {
-  const cleanName = name.trim();
-
-  if (!cleanName) return null;
-
-  const existingBaseOption = findAvailabilityOption(
-    disponibilidadOptions,
-    cleanName
-  );
-
-  if (existingBaseOption) return existingBaseOption;
-
-  const slug = createSlug(cleanName) || cleanName;
-
-  return {
-    id: slug,
-    nombre: cleanName,
-    value: cleanName,
-    estado: cleanName,
-    custom: true
-  };
-}
-
-function mergeAvailabilityOptions(options = []) {
-  return options.reduce((accumulator, option) => {
-    const normalizedOption = normalizeAvailabilityOption(option);
-
-    if (!normalizedOption) return accumulator;
-
-    const exists = accumulator.some((item) => {
-      return (
-        availabilityOptionMatches(item, normalizedOption.nombre) ||
-        availabilityOptionMatches(item, normalizedOption.value) ||
-        availabilityOptionMatches(item, normalizedOption.estado)
-      );
-    });
-
-    if (!exists) {
-      accumulator.push(normalizedOption);
-    }
-
-    return accumulator;
-  }, []);
 }
 
 function getId(item) {
@@ -669,21 +568,9 @@ function AdminProductsPage() {
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [characters, form.serieNombre]);
 
-  const availabilityOptions = useMemo(() => {
-    const availabilityFromProducts = (products || [])
-      .map((product) => product?.disponibilidad)
-      .filter(Boolean);
-
-    return mergeAvailabilityOptions([
-      ...disponibilidadOptions,
-      ...availabilityFromProducts
-    ]);
-  }, [products]);
-
-  const selectedAvailability =
-    findAvailabilityOption(availabilityOptions, form.disponibilidad) ||
-    createAvailabilityOption(form.disponibilidad) ||
-    disponibilidadOptions[0];
+  const selectedAvailability = disponibilidadOptions.find(
+    (option) => option.value === form.disponibilidad
+  );
 
   const refreshProductTypes = async () => {
     setLoadingProductTypes(true);
@@ -803,9 +690,7 @@ function AdminProductsPage() {
   };
 
   const handleAvailabilityChange = (value) => {
-    const option =
-      findAvailabilityOption(availabilityOptions, value) ||
-      createAvailabilityOption(value);
+    const option = disponibilidadOptions.find((item) => item.nombre === value);
 
     if (!option) return;
 
@@ -814,31 +699,6 @@ function AdminProductsPage() {
       disponibilidad: option.value,
       estado: option.estado
     }));
-  };
-
-  const handleCreateAvailability = (name) => {
-    const cleanName = name.trim();
-
-    if (!cleanName) return null;
-
-    const existingOption = findAvailabilityOption(
-      availabilityOptions,
-      cleanName
-    );
-
-    if (existingOption) return existingOption;
-
-    return createAvailabilityOption(cleanName);
-  };
-
-  const handleAvailabilityCreateLabel = (name) => {
-    const existingOption = findAvailabilityOption(availabilityOptions, name);
-
-    if (existingOption) {
-      return `Usar “${existingOption.nombre}” existente`;
-    }
-
-    return `Agregar “${name}” a disponibilidad`;
   };
 
   const handleSimpleCreatableCreate = (name) => ({
@@ -861,6 +721,21 @@ function AdminProductsPage() {
       return existingType;
     }
 
+    const existingManagedType = managedProductTypes.find(
+      (productType) =>
+        normalizeText(productType.nombre) === normalizeText(cleanName)
+    );
+
+    if (existingManagedType) {
+      if (existingManagedType.activo === false) {
+        throw new Error(
+          `El tipo de producto “${existingManagedType.nombre}” ya existe, pero está desactivado. Actívalo en Tipos de producto antes de usarlo.`
+        );
+      }
+
+      return existingManagedType;
+    }
+
     try {
       const data = await apiCreateProductType({
         nombre: cleanName,
@@ -876,7 +751,8 @@ function AdminProductsPage() {
       const option = {
         ...createdProductType,
         id: getId(createdProductType) || cleanName,
-        nombre: createdProductType.nombre || cleanName
+        nombre: createdProductType.nombre || cleanName,
+        activo: createdProductType.activo !== false
       };
 
       setManagedProductTypes((currentTypes) => {
@@ -904,28 +780,63 @@ function AdminProductsPage() {
 
       return option;
     } catch (error) {
-      const fallbackOption = {
-        id: `temp-product-type-${Date.now()}-${cleanName}`,
-        nombre: cleanName,
-        activo: true
-      };
+      let existingProductType = null;
 
-      setManagedProductTypes((currentTypes) => {
-        const exists = currentTypes.some(
-          (item) => normalizeText(item.nombre) === normalizeText(cleanName)
+      try {
+        const data = await apiGetProductTypes({
+          activos: "false"
+        });
+
+        const list = pickProductTypes(data).map(normalizeProductTypeFromApi);
+
+        existingProductType = list.find(
+          (productType) =>
+            normalizeText(productType.nombre) === normalizeText(cleanName)
         );
 
-        if (exists) return currentTypes;
+        if (list.length > 0) {
+          setManagedProductTypes((currentTypes) => {
+            const mergedTypes = [...currentTypes];
 
-        return [fallbackOption, ...currentTypes];
-      });
+            list.forEach((productType) => {
+              const existingIndex = mergedTypes.findIndex(
+                (item) =>
+                  getId(item) === getId(productType) ||
+                  normalizeText(item.nombre) ===
+                    normalizeText(productType.nombre)
+              );
 
-      setMessage(
+              if (existingIndex >= 0) {
+                mergedTypes[existingIndex] = {
+                  ...mergedTypes[existingIndex],
+                  ...productType
+                };
+              } else {
+                mergedTypes.push(productType);
+              }
+            });
+
+            return mergedTypes;
+          });
+        }
+      } catch {
+        // Se mantiene el error original de creación.
+      }
+
+      if (existingProductType) {
+        if (existingProductType.activo === false) {
+          throw new Error(
+            `El tipo de producto “${existingProductType.nombre}” ya existe, pero está desactivado. Actívalo en Tipos de producto antes de usarlo.`
+          );
+        }
+
+        return existingProductType;
+      }
+
+      throw new Error(
         error.message ||
-          "No se pudo guardar el tipo de producto en la sección global, pero se usará en este producto."
+          `No se pudo guardar “${cleanName}” en Gestión de tipos de producto. El producto no se guardó para evitar que el tipo quede solo local.`
       );
-
-      return fallbackOption;
     }
   };
 
@@ -1533,13 +1444,9 @@ function AdminProductsPage() {
               label="Disponibilidad"
               value={selectedAvailability?.nombre || "En stock"}
               onChange={handleAvailabilityChange}
-              onCreate={handleCreateAvailability}
-              options={availabilityOptions}
-              placeholder="Seleccionar o escribir disponibilidad"
+              options={disponibilidadOptions}
+              placeholder="Seleccionar disponibilidad"
               emptyLabel="En stock"
-              emptyCreateLabel="Agregar disponibilidad"
-              createLabel={handleAvailabilityCreateLabel}
-              helperText="Puedes agregar una nueva disponibilidad, pero si escribes algo equivalente a una existente como “stock” o “En stock”, se usará la opción existente y no se duplicará."
               disabled={false}
             />
 
