@@ -4,7 +4,6 @@ import {
   Bell,
   CalendarDays,
   Check,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Heart,
@@ -675,13 +674,12 @@ function EventGallery({ event, title }) {
 function EventDetailPage() {
   const { slug } = useParams();
 
-  const { isAuthenticated, isStaff, isClient, currentUser } = useAuth();
+  const { isAuthenticated, isStaff, currentUser } = useAuth();
   const { events, products } = useAdminData();
 
   const [maxPrice, setMaxPrice] = useState(priceRangeConfig.max);
   const [selectedType, setSelectedType] = useState("");
   const [selectedCharacter, setSelectedCharacter] = useState("");
-  const [actionsOpen, setActionsOpen] = useState(false);
   const [feedbackMessage, setFeedbackMessage] = useState("");
   const [eventPreferences, setEventPreferences] = useState(() =>
     safeReadEventPreferences()
@@ -759,8 +757,7 @@ function EventDetailPage() {
   const eventReminderEnabled = Boolean(currentEventPreference.notifyBeforeEnd);
 
   const canUseClientActions =
-    Boolean(isAuthenticated && isClient && !isStaff && event) &&
-    canSaveOrNotifyEvent(event);
+    Boolean(isAuthenticated && event) && canSaveOrNotifyEvent(event);
 
   const updateCurrentEventPreference = (nextPreference) => {
     if (!event) return;
@@ -793,7 +790,6 @@ function EventDetailPage() {
     });
 
     setFeedbackMessage("Evento guardado en tu lista.");
-    setActionsOpen(false);
   };
 
   const handleRemoveSavedEvent = () => {
@@ -803,7 +799,6 @@ function EventDetailPage() {
     });
 
     setFeedbackMessage("Evento quitado de tus guardados.");
-    setActionsOpen(false);
   };
 
   const handleEnableReminder = async () => {
@@ -824,7 +819,6 @@ function EventDetailPage() {
       }
     }
 
-    setActionsOpen(false);
   };
 
   const handleDisableReminder = () => {
@@ -833,7 +827,6 @@ function EventDetailPage() {
     });
 
     setFeedbackMessage("Aviso del evento desactivado.");
-    setActionsOpen(false);
   };
 
   useEffect(() => {
@@ -946,90 +939,47 @@ function EventDetailPage() {
               </Link>
             )}
 
-            {!isStaff && canSaveOrNotifyEvent(event) && (
+            {canSaveOrNotifyEvent(event) && (
               <>
-                {isAuthenticated && isClient ? (
-                  <div className="relative">
+                {isAuthenticated ? (
+                  <div className="grid gap-3">
                     <button
                       type="button"
-                      onClick={() => setActionsOpen((current) => !current)}
-                      className="smika-button-primary w-full flex items-center justify-center gap-2"
+                      onClick={eventIsSaved ? handleRemoveSavedEvent : handleSaveEvent}
+                      disabled={!canUseClientActions}
+                      className={`w-full rounded-full px-5 py-3 font-black flex items-center justify-center gap-2 transition disabled:opacity-60 ${
+                        eventIsSaved
+                          ? "bg-[#87CCC8] text-white"
+                          : "bg-white text-[#2F2F2F]"
+                      }`}
                     >
-                      {eventReminderEnabled ? (
-                        <Bell size={18} />
+                      {eventIsSaved ? (
+                        <Check size={18} />
                       ) : (
                         <Heart size={18} />
                       )}
-
-                      {eventReminderEnabled
-                        ? "Aviso activado"
-                        : eventIsSaved
-                        ? "Evento guardado"
-                        : "Guardar / avisarme"}
-
-                      <ChevronDown
-                        size={17}
-                        className={`transition ${
-                          actionsOpen ? "rotate-180" : ""
-                        }`}
-                      />
+                      {eventIsSaved ? "Evento guardado" : "Guardar evento"}
                     </button>
 
-                    {actionsOpen && (
-                      <div className="absolute right-0 top-[58px] z-40 w-full rounded-3xl border border-[#87CCC8]/20 bg-white p-3 smika-shadow">
-                        <button
-                          type="button"
-                          onClick={handleSaveEvent}
-                          className="flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-left text-sm font-black hover:bg-[#F8F6F7]"
-                        >
-                          <Heart size={17} />
-                          Guardar evento
-
-                          {eventIsSaved && (
-                            <Check
-                              size={17}
-                              className="ml-auto text-[#87CCC8]"
-                            />
-                          )}
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={handleEnableReminder}
-                          className="flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-left text-sm font-black hover:bg-[#F8F6F7]"
-                        >
-                          <Bell size={17} />
-                          Avisarme antes de terminar
-
-                          {eventReminderEnabled && (
-                            <Check
-                              size={17}
-                              className="ml-auto text-[#87CCC8]"
-                            />
-                          )}
-                        </button>
-
-                        {eventReminderEnabled && (
-                          <button
-                            type="button"
-                            onClick={handleDisableReminder}
-                            className="flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-left text-sm font-black hover:bg-[#F8F6F7]"
-                          >
-                            Quitar aviso
-                          </button>
-                        )}
-
-                        {eventIsSaved && (
-                          <button
-                            type="button"
-                            onClick={handleRemoveSavedEvent}
-                            className="flex w-full items-center gap-2 rounded-2xl px-4 py-3 text-left text-sm font-black text-red-500 hover:bg-[#F8F6F7]"
-                          >
-                            Quitar guardado
-                          </button>
-                        )}
-                      </div>
-                    )}
+                    <button
+                      type="button"
+                      onClick={
+                        eventReminderEnabled
+                          ? handleDisableReminder
+                          : handleEnableReminder
+                      }
+                      disabled={!canUseClientActions}
+                      className={`w-full rounded-full px-5 py-3 font-black flex items-center justify-center gap-2 transition disabled:opacity-60 ${
+                        eventReminderEnabled
+                          ? "bg-[#D1B0C7] text-white"
+                          : "bg-white text-[#2F2F2F]"
+                      }`}
+                    >
+                      {eventReminderEnabled ? <Check size={18} /> : <Bell size={18} />}
+                      {eventReminderEnabled
+                        ? "Aviso activado"
+                        : "Avisarme antes de terminar"}
+                    </button>
                   </div>
                 ) : (
                   <Link

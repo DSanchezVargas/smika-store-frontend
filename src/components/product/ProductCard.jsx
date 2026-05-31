@@ -1,12 +1,36 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Heart, Loader2, ShoppingBag } from "lucide-react";
 
 import { useAuth } from "../../context/AuthContext";
 import { addProductToCart } from "../../services/cartService";
 
+const FAVORITES_KEY = "smika_favorites_v1";
+
 function isMongoObjectId(value) {
   return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
+}
+
+function readLocalArray(key) {
+  try {
+    const value = localStorage.getItem(key);
+
+    if (!value) return [];
+
+    const parsed = JSON.parse(value);
+
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveLocalArray(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // No rompemos la tarjeta si el navegador bloquea localStorage.
+  }
 }
 
 function getProductId(product) {
@@ -41,6 +65,10 @@ function getProductPrice(product) {
 }
 
 function getProductType(product) {
+  if (Array.isArray(product?.tiposProducto) && product.tiposProducto.length > 0) {
+    return product.tiposProducto.join(", ");
+  }
+
   return product?.tipoProducto || product?.tipo || product?.type || "Producto";
 }
 
@@ -50,6 +78,14 @@ function getProductSeries(product) {
   }
 
   return product?.serieNombre || product?.series || product?.serie || "Smika Store";
+}
+
+function getProductEvent(product) {
+  if (typeof product?.evento === "object" && product.evento !== null) {
+    return product.evento.titulo || product.evento.nombre || "";
+  }
+
+  return product?.eventoNombre || product?.event || product?.evento || "";
 }
 
 function getProductCategory(product) {
@@ -91,6 +127,25 @@ function getAvailabilityText(product) {
   );
 }
 
+function buildFavoriteItem(product) {
+  const productId = getProductId(product);
+  const productImage = getProductImage(product);
+
+  return {
+    id: productId || product?.slug || getProductName(product),
+    productId,
+    slug: product?.slug || productId,
+    nombre: getProductName(product),
+    precio: getProductPrice(product),
+    tipo: getProductType(product),
+    serie: getProductSeries(product),
+    evento: getProductEvent(product),
+    imagen: productImage,
+    imagenes: product?.imagenes || [],
+    savedAt: new Date().toISOString()
+  };
+}
+
 function ProductCard({ product }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -98,6 +153,7 @@ function ProductCard({ product }) {
 
   const [cartMessage, setCartMessage] = useState("");
   const [cartLoading, setCartLoading] = useState(false);
+  const [isFavorite, setIsFavorite] = useState(false);
 
   const user = auth?.user || auth?.currentUser || null;
   const isAuthenticated = Boolean(auth?.isAuthenticated || user);
@@ -110,6 +166,21 @@ function ProductCard({ product }) {
   const productCategory = getProductCategory(product);
   const productSeries = getProductSeries(product);
   const availabilityText = getAvailabilityText(product);
+
+  useEffect(() => {
+    const favorites = readLocalArray(FAVORITES_KEY);
+    const favoriteId = productId || productSlug || productName;
+
+    setIsFavorite(
+      favorites.some((item) => {
+        return (
+          item.id === favoriteId ||
+          item.productId === productId ||
+          item.slug === productSlug
+        );
+      })
+    );
+  }, [productId, productSlug, productName]);
 
   const goToLogin = () => {
     navigate(
@@ -163,7 +234,35 @@ function ProductCard({ product }) {
       return;
     }
 
-    showTemporaryMessage("Favoritos se conectará con preferencias del usuario.");
+    const favoriteItem = buildFavoriteItem(product);
+    const favorites = readLocalArray(FAVORITES_KEY);
+
+    const exists = favorites.some((item) => {
+      return (
+        item.id === favoriteItem.id ||
+        item.productId === favoriteItem.productId ||
+        item.slug === favoriteItem.slug
+      );
+    });
+
+    if (exists) {
+      const nextFavorites = favorites.filter((item) => {
+        return !(
+          item.id === favoriteItem.id ||
+          item.productId === favoriteItem.productId ||
+          item.slug === favoriteItem.slug
+        );
+      });
+
+      saveLocalArray(FAVORITES_KEY, nextFavorites);
+      setIsFavorite(false);
+      showTemporaryMessage("Favorito quitado.");
+      return;
+    }
+
+    saveLocalArray(FAVORITES_KEY, [...favorites, favoriteItem]);
+    setIsFavorite(true);
+    showTemporaryMessage("Producto guardado como favorito.");
   };
 
   return (
@@ -220,10 +319,12 @@ function ProductCard({ product }) {
           <button
             type="button"
             onClick={handleFavorite}
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[#F7D9D8]"
-            title="Guardar favorito"
+            className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition ${
+              isFavorite ? "bg-[#87CCC8] text-white" : "bg-[#F7D9D8]"
+            }`}
+            title={isFavorite ? "Quitar favorito" : "Guardar favorito"}
           >
-            <Heart size={18} />
+            <Heart size={18} fill={isFavorite ? "currentColor" : "none"} />
           </button>
         </div>
 

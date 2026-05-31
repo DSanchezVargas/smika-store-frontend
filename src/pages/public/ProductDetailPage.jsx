@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowLeft,
   ChevronLeft,
@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 
 import { useAdminData } from "../../context/AdminDataContext";
+import { useAuth } from "../../context/AuthContext";
 import { getPublicProducts } from "../../utils/publicProducts";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 
@@ -28,7 +29,11 @@ function readLocalArray(key) {
 }
 
 function saveLocalArray(key, value) {
-  localStorage.setItem(key, JSON.stringify(value));
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // No rompemos la página si el navegador bloquea localStorage.
+  }
 }
 
 function getImageSource(image) {
@@ -46,12 +51,39 @@ function getImageSource(image) {
   );
 }
 
+function getProductId(product) {
+  return product?._id || product?.mongoId || product?.productId || product?.id || product?.slug || "";
+}
+
+function buildStoredProduct(product) {
+  const productId = getProductId(product);
+
+  return {
+    id: productId,
+    productId,
+    slug: product.slug || productId,
+    nombre: product.nombre,
+    precio: product.precio || product.price || product.precioReferencial || 0,
+    tipo: product.tipo || product.tipoProducto || "Producto",
+    serie: product.serieNombre || product.serie || "",
+    evento: product.eventoNombre || product.evento || "",
+    cantidad: 1,
+    imagen: product.image || product.imagen || getImageSource(product.imagenes?.[0]) || "",
+    imagenes: product.imagenes || [],
+    savedAt: new Date().toISOString()
+  };
+}
+
 function ProductDetailPage() {
   const { slug } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const auth = useAuth();
   const { products } = useAdminData();
 
   const [message, setMessage] = useState("");
   const [activeImageIndex, setActiveImageIndex] = useState(0);
+  const [isFavorite, setIsFavorite] = useState(false);
 
   const publicProducts = useMemo(() => {
     return getPublicProducts(products);
@@ -79,10 +111,41 @@ function ProductDetailPage() {
   const hasImages = galleryImages.length > 0;
   const hasMultipleImages = galleryImages.length > 1;
 
+  const user = auth?.user || auth?.currentUser || null;
+  const isAuthenticated = Boolean(auth?.isAuthenticated || user);
+
+  const goToLogin = () => {
+    navigate(
+      `/login?redirect=${encodeURIComponent(
+        location.pathname + location.search
+      )}`
+    );
+  };
+
   useEffect(() => {
     setActiveImageIndex(0);
     setMessage("");
   }, [slug]);
+
+  useEffect(() => {
+    if (!product) {
+      setIsFavorite(false);
+      return;
+    }
+
+    const productId = getProductId(product);
+    const favorites = readLocalArray(FAVORITES_KEY);
+
+    setIsFavorite(
+      favorites.some((item) => {
+        return (
+          item.id === productId ||
+          item.productId === productId ||
+          item.slug === product.slug
+        );
+      })
+    );
+  }, [product]);
 
   const goToPreviousImage = () => {
     setActiveImageIndex((currentIndex) => {
@@ -101,63 +164,67 @@ function ProductDetailPage() {
   const handleAddToOrderList = () => {
     if (!product) return;
 
+    if (!isAuthenticated) {
+      goToLogin();
+      return;
+    }
+
+    const storedProduct = buildStoredProduct(product);
     const currentList = readLocalArray(ORDER_LIST_KEY);
 
-    const exists = currentList.some((item) => item.id === product.id);
+    const exists = currentList.some((item) => {
+      return (
+        item.id === storedProduct.id ||
+        item.productId === storedProduct.productId ||
+        item.slug === storedProduct.slug
+      );
+    });
 
     if (exists) {
       setMessage("Este producto ya está en tu lista de pedido.");
       return;
     }
 
-    const nextList = [
-      ...currentList,
-      {
-        id: product.id,
-        slug: product.slug,
-        nombre: product.nombre,
-        precio: product.precio,
-        tipo: product.tipo,
-        serie: product.serie,
-        evento: product.evento,
-        cantidad: 1,
-        imagen: product.image || product.imagen || "",
-        imagenes: product.imagenes || []
-      }
-    ];
-
-    saveLocalArray(ORDER_LIST_KEY, nextList);
+    saveLocalArray(ORDER_LIST_KEY, [...currentList, storedProduct]);
     setMessage("Producto agregado a tu lista de pedido.");
   };
 
   const handleSaveFavorite = () => {
     if (!product) return;
 
-    const currentFavorites = readLocalArray(FAVORITES_KEY);
-
-    const exists = currentFavorites.some((item) => item.id === product.id);
-
-    if (exists) {
-      setMessage("Este producto ya está guardado como favorito.");
+    if (!isAuthenticated) {
+      goToLogin();
       return;
     }
 
-    const nextFavorites = [
-      ...currentFavorites,
-      {
-        id: product.id,
-        slug: product.slug,
-        nombre: product.nombre,
-        precio: product.precio,
-        tipo: product.tipo,
-        serie: product.serie,
-        evento: product.evento,
-        imagen: product.image || product.imagen || "",
-        imagenes: product.imagenes || []
-      }
-    ];
+    const storedProduct = buildStoredProduct(product);
+    const currentFavorites = readLocalArray(FAVORITES_KEY);
 
-    saveLocalArray(FAVORITES_KEY, nextFavorites);
+    const exists = currentFavorites.some((item) => {
+      return (
+        item.id === storedProduct.id ||
+        item.productId === storedProduct.productId ||
+        item.slug === storedProduct.slug
+      );
+    });
+
+    if (exists) {
+      const nextFavorites = currentFavorites.filter((item) => {
+        return !(
+          item.id === storedProduct.id ||
+          item.productId === storedProduct.productId ||
+          item.slug === storedProduct.slug
+        );
+      });
+
+      saveLocalArray(FAVORITES_KEY, nextFavorites);
+      setIsFavorite(false);
+      setMessage("Producto quitado de favoritos.");
+      return;
+    }
+
+    saveLocalArray(FAVORITES_KEY, [...currentFavorites, storedProduct]);
+    setIsFavorite(true);
     setMessage("Producto guardado como favorito.");
   };
 
@@ -377,10 +444,12 @@ function ProductDetailPage() {
             <button
               type="button"
               onClick={handleSaveFavorite}
-              className="smika-button flex items-center gap-2"
+              className={`smika-button flex items-center gap-2 ${
+                isFavorite ? "bg-[#87CCC8] text-white" : ""
+              }`}
             >
-              <Heart size={18} />
-              Guardar favorito
+              <Heart size={18} fill={isFavorite ? "currentColor" : "none"} />
+              {isFavorite ? "Favorito guardado" : "Guardar favorito"}
             </button>
           </div>
         </div>
