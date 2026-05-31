@@ -18,6 +18,7 @@ import { useAdminData } from "../../context/AdminDataContext";
 
 const initialForm = {
   nombre: "",
+  descripcion: "",
   categoriaNombre: "",
   serieNombre: "",
   eventoNombre: "",
@@ -541,6 +542,7 @@ function AdminProductsPage() {
 
     setForm({
       nombre: product.nombre || "",
+      descripcion: product.descripcion || "",
       categoriaNombre: getProductCategoryName(product),
       serieNombre: getProductSeriesName(product),
       eventoNombre: getProductEventName(product),
@@ -670,6 +672,7 @@ function AdminProductsPage() {
 
     const payload = {
       nombre: form.nombre.trim(),
+      descripcion: form.descripcion.trim(),
 
       categoriaId: category.id,
       categoria: category.id,
@@ -914,6 +917,18 @@ function AdminProductsPage() {
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
                 placeholder="Ejemplo: Stand de acrílico..."
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black lg:col-span-2">
+              Descripción opcional
+              <textarea
+                name="descripcion"
+                value={form.descripcion}
+                onChange={handleChange}
+                rows="3"
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Escribe una descripción visible en el detalle del producto. Si lo dejas vacío, se mostrará el texto por defecto."
               />
             </label>
 
