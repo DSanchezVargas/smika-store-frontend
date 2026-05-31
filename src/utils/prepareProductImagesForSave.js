@@ -1,11 +1,30 @@
 import { createCroppedCompressedImage } from "./cropAndCompressImage";
 
+function getImageSource(image) {
+  if (!image) return "";
+
+  if (typeof image === "string") return image;
+
+  return (
+    image.finalPreview ||
+    image.url ||
+    image.preview ||
+    image.src ||
+    image.imagen ||
+    ""
+  );
+}
+
 function fileToDataUrl(file) {
   return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+
     const reader = new FileReader();
 
     reader.onload = () => resolve(reader.result);
-
     reader.onerror = () => {
       reject(new Error("No se pudo convertir la imagen para guardarla."));
     };
@@ -27,10 +46,47 @@ async function sourceToDataUrl(src) {
   return fileToDataUrl(blob);
 }
 
+function isExistingImageWithoutNewFile(image) {
+  if (!image || typeof image === "string") return Boolean(image);
+
+  const hasNewFile = Boolean(image.file || image.finalFile);
+  const hasExistingSource = Boolean(getImageSource(image));
+
+  return hasExistingSource && !hasNewFile;
+}
+
+function preserveExistingImage(image) {
+  const source = getImageSource(image);
+
+  if (typeof image === "string") {
+    return {
+      url: source,
+      preview: source,
+      finalPreview: source,
+      storage: source.startsWith("data:") ? "local-data-url" : "existing"
+    };
+  }
+
+  return {
+    ...image,
+    url: image.url || source,
+    preview: image.preview || source,
+    finalPreview: image.finalPreview || source,
+    storage:
+      image.storage ||
+      (source.startsWith("data:") ? "local-data-url" : "existing")
+  };
+}
+
 export async function prepareProductImagesForSave(images = []) {
   const preparedImages = [];
 
   for (const image of images) {
+    if (isExistingImageWithoutNewFile(image)) {
+      preparedImages.push(preserveExistingImage(image));
+      continue;
+    }
+
     let finalImage = null;
 
     if (image.finalCompressed && (image.finalFile || image.finalPreview)) {

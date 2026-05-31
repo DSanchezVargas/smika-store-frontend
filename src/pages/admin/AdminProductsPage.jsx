@@ -178,9 +178,12 @@ async function imageToPersistedSource(image) {
   if (typeof image === "object") {
     return {
       ...image,
-      url: source,
+      url: image.url || source,
       preview: image.preview || source,
-      finalPreview: image.finalPreview || source
+      finalPreview: image.finalPreview || source,
+      storage:
+        image.storage ||
+        (source.startsWith("data:") ? "local-data-url" : "existing")
     };
   }
 
@@ -188,7 +191,7 @@ async function imageToPersistedSource(image) {
     url: source,
     preview: source,
     finalPreview: source,
-    storage: source.startsWith("data:") ? "local-data-url" : "external"
+    storage: source.startsWith("data:") ? "local-data-url" : "existing"
   };
 }
 
@@ -238,7 +241,7 @@ function createEditableImageFromProduct(image, index = 0) {
   if (!source) return null;
 
   return {
-    id: `product-image-${Date.now()}-${index}-${Math.random()}`,
+    id: image?.id || `product-image-${Date.now()}-${index}-${Math.random()}`,
     name: image?.name || `imagen-producto-${index + 1}.jpg`,
     originalName: image?.originalName || image?.name || "",
     preview: image?.preview || source,
@@ -248,10 +251,10 @@ function createEditableImageFromProduct(image, index = 0) {
     originalSize: Number(image?.originalSize || image?.size || 0),
     compressedSize: Number(image?.compressedSize || image?.size || 0),
     finalSize: Number(image?.finalSize || image?.size || 0),
-    width: Number(image?.width || 1200),
-    height: Number(image?.height || 900),
-    finalWidth: Number(image?.finalWidth || 1200),
-    finalHeight: Number(image?.finalHeight || 900),
+    width: Number(image?.width || image?.finalWidth || 1200),
+    height: Number(image?.height || image?.finalHeight || 900),
+    finalWidth: Number(image?.finalWidth || image?.width || 1200),
+    finalHeight: Number(image?.finalHeight || image?.height || 900),
     crop: image?.crop || {
       x: 0,
       y: 0,
@@ -265,7 +268,7 @@ function createEditableImageFromProduct(image, index = 0) {
     },
     finalQuality: image?.finalQuality || 0.92,
     finalType: image?.finalType || "image/jpeg",
-    finalCompressed: true,
+    finalCompressed: image?.finalCompressed !== false,
     storage: image?.storage || "existing"
   };
 }
@@ -711,8 +714,8 @@ function AdminProductsPage() {
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
               Crea productos usando categorías reales desde MongoDB. Si editas
-              nombre, precio, stock u otros datos, las imágenes no se modifican
-              salvo que vuelvas a tocarlas.
+              nombre, precio, stock, evento o serie, las imágenes no se
+              modifican salvo que vuelvas a tocar la zona de imágenes.
             </p>
           </div>
 
@@ -815,7 +818,10 @@ function AdminProductsPage() {
                 <option value="">Seleccionar categoría existente</option>
 
                 {activeCategories.map((category) => (
-                  <option key={category._id || category.id} value={category._id || category.id}>
+                  <option
+                    key={category._id || category.id}
+                    value={category._id || category.id}
+                  >
                     {category.nombre}
                   </option>
                 ))}
@@ -1038,21 +1044,9 @@ function AdminProductsPage() {
                     <CroppedImagePreview
                       key={image.id || index}
                       image={image}
-                      index={index}
-                      onChange={(updatedImage) => {
-                        setImagesTouched(true);
-                        setImages((currentImages) =>
-                          currentImages.map((item, itemIndex) =>
-                            itemIndex === index ? updatedImage : item
-                          )
-                        );
-                      }}
-                      onRemove={() => {
-                        setImagesTouched(true);
-                        setImages((currentImages) =>
-                          currentImages.filter((_, itemIndex) => itemIndex !== index)
-                        );
-                      }}
+                      alt={`Imagen ${index + 1}`}
+                      className="aspect-square w-full"
+                      rounded="rounded-2xl"
                     />
                   ))}
                 </div>
