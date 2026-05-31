@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Heart,
   ImageIcon,
+  Loader2,
   PackageCheck,
   ShoppingBag,
   Tag
@@ -15,9 +16,17 @@ import { useAdminData } from "../../context/AdminDataContext";
 import { useAuth } from "../../context/AuthContext";
 import { getPublicProducts } from "../../utils/publicProducts";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
+import {
+  getMyPreferences,
+  isProductFavorite,
+  isProductInWishlist,
+  PREFERENCE_EVENT_NAME,
+  readCachedPreferences,
+  toggleFavoriteProduct,
+  toggleWishlistProduct
+} from "../../services/preferenceService";
 
 const ORDER_LIST_KEY = "smika_order_list_v1";
-const FAVORITES_KEY = "smika_favorites_v1";
 
 function readLocalArray(key) {
   try {
@@ -36,6 +45,10 @@ function saveLocalArray(key, value) {
   }
 }
 
+function isMongoObjectId(value) {
+  return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
+}
+
 function getImageSource(image) {
   if (!image) return "";
 
@@ -52,18 +65,26 @@ function getImageSource(image) {
 }
 
 function getProductId(product) {
-  return product?._id || product?.mongoId || product?.productId || product?.id || product?.slug || "";
+  return product?._id || product?.mongoId || product?.productId || product?.id || "";
+}
+
+function getStoredProductId(product) {
+  return getProductId(product) || product?.slug || product?.nombre || "";
+}
+
+function getProductPrice(product) {
+  return Number(product?.precio || product?.price || product?.precioReferencial || 0);
 }
 
 function buildStoredProduct(product) {
-  const productId = getProductId(product);
+  const productId = getStoredProductId(product);
 
   return {
     id: productId,
     productId,
     slug: product.slug || productId,
     nombre: product.nombre,
-    precio: product.precio || product.price || product.precioReferencial || 0,
+    precio: getProductPrice(product),
     tipo: product.tipo || product.tipoProducto || "Producto",
     serie: product.serieNombre || product.serie || "",
     evento: product.eventoNombre || product.evento || "",
@@ -74,56 +95,37 @@ function buildStoredProduct(product) {
   };
 }
 
-
 function parseInlineMarkdown(text = "") {
-  const source = String(text || "");
-  const tokens = [];
-  const pattern = /(\*\*.+?\*\*|__.+?__|\*.+?\*)/g;
+  const parts = text.split(/(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*)/g);
 
-  let lastIndex = 0;
-  let match;
+  return parts.map((part, index) => {
+    if (!part) return null;
 
-  while ((match = pattern.exec(source)) !== null) {
-    if (match.index > lastIndex) {
-      tokens.push(source.slice(lastIndex, match.index));
-    }
-
-    const token = match[0];
-    const key = `${token}-${match.index}`;
-
-    if (token.startsWith("**") && token.endsWith("**")) {
-      tokens.push(
-        <strong key={key} className="font-black text-[#2F2F2F]">
-          {token.slice(2, -2)}
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={`${part}-${index}`} className="font-black text-[#2F2F2F]">
+          {part.slice(2, -2)}
         </strong>
       );
-    } else if (token.startsWith("__") && token.endsWith("__")) {
-      tokens.push(
-        <span key={key} className="underline decoration-2 underline-offset-4">
-          {token.slice(2, -2)}
+    }
+
+    if (part.startsWith("__") && part.endsWith("__")) {
+      return (
+        <span key={`${part}-${index}`} className="underline decoration-2 underline-offset-4">
+          {part.slice(2, -2)}
         </span>
       );
-    } else if (token.startsWith("*") && token.endsWith("*")) {
-      tokens.push(
-        <em key={key} className="italic">
-          {token.slice(1, -1)}
+    }
+
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return (
+        <em key={`${part}-${index}`} className="italic">
+          {part.slice(1, -1)}
         </em>
       );
     }
 
-    lastIndex = match.index + token.length;
-  }
-
-  if (lastIndex < source.length) {
-    tokens.push(source.slice(lastIndex));
-  }
-
-  return tokens.map((token, index) => {
-    if (typeof token === "string") {
-      return <span key={`text-${index}`}>{token}</span>;
-    }
-
-    return token;
+    return part;
   });
 }
 
@@ -131,28 +133,16 @@ function FormattedProductDescription({ description }) {
   const fallbackDescription =
     "Producto registrado en Smika Store. Aquí se muestra la información disponible del producto, incluyendo serie, tipo, disponibilidad, precio referencial e imágenes.";
 
-  const text = String(description || "").trim() || fallbackDescription;
-  const lines = text.replace(/\\n/g, "\n").split(/\r?\n/);
+  const text = description?.trim() || fallbackDescription;
+  const lines = text.split(/\r?\n/);
 
   return (
-    <div className="mt-6 rounded-[28px] bg-[#F8F6F7] p-5 text-gray-700 leading-8">
-      <p className="mb-3 text-sm font-black text-[#87CCC8]">
-        Descripción
-      </p>
-
-      <div className="space-y-3 whitespace-pre-wrap break-words">
-        {lines.map((line, index) => {
-          if (!line.trim()) {
-            return <div key={`empty-${index}`} className="h-3" />;
-          }
-
-          return (
-            <p key={`${line}-${index}`}>
-              {parseInlineMarkdown(line)}
-            </p>
-          );
-        })}
-      </div>
+    <div className="mt-6 space-y-3 text-gray-600 leading-8">
+      {lines.map((line, index) => (
+        <p key={`${index}-${line}`} className={line.trim() ? "" : "h-4"}>
+          {line.trim() ? parseInlineMarkdown(line) : <span>&nbsp;</span>}
+        </p>
+      ))}
     </div>
   );
 }
@@ -167,6 +157,12 @@ function ProductDetailPage() {
   const [message, setMessage] = useState("");
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [isWishlist, setIsWishlist] = useState(false);
+  const [favoriteLoading, setFavoriteLoading] = useState(false);
+  const [wishlistLoading, setWishlistLoading] = useState(false);
+
+  const user = auth?.user || auth?.currentUser || null;
+  const isAuthenticated = Boolean(auth?.isAuthenticated || user);
 
   const publicProducts = useMemo(() => {
     return getPublicProducts(products);
@@ -175,6 +171,8 @@ function ProductDetailPage() {
   const product = useMemo(() => {
     return publicProducts.find((item) => item.slug === slug);
   }, [publicProducts, slug]);
+
+  const productId = getProductId(product);
 
   const galleryImages = useMemo(() => {
     if (!product) return [];
@@ -194,9 +192,6 @@ function ProductDetailPage() {
   const hasImages = galleryImages.length > 0;
   const hasMultipleImages = galleryImages.length > 1;
 
-  const user = auth?.user || auth?.currentUser || null;
-  const isAuthenticated = Boolean(auth?.isAuthenticated || user);
-
   const goToLogin = () => {
     navigate(
       `/login?redirect=${encodeURIComponent(
@@ -205,30 +200,68 @@ function ProductDetailPage() {
     );
   };
 
+  const applyPreferencesToState = (preferences) => {
+    if (!product) {
+      setIsFavorite(false);
+      setIsWishlist(false);
+      return;
+    }
+
+    setIsFavorite(
+      isProductFavorite(preferences, productId) ||
+        isProductFavorite(preferences, product.slug)
+    );
+
+    setIsWishlist(
+      isProductInWishlist(preferences, productId) ||
+        isProductInWishlist(preferences, product.slug)
+    );
+  };
+
+  const refreshPreferenceState = async ({ silent = false } = {}) => {
+    if (!isAuthenticated || !product) {
+      setIsFavorite(false);
+      setIsWishlist(false);
+      return;
+    }
+
+    const cachedPreferences = readCachedPreferences();
+
+    if (cachedPreferences) {
+      applyPreferencesToState(cachedPreferences);
+    }
+
+    try {
+      const preferences = await getMyPreferences();
+      applyPreferencesToState(preferences);
+    } catch (error) {
+      if (!silent && (error.status === 401 || error.message?.toLowerCase().includes("token"))) {
+        goToLogin();
+      }
+    }
+  };
+
   useEffect(() => {
     setActiveImageIndex(0);
     setMessage("");
   }, [slug]);
 
   useEffect(() => {
-    if (!product) {
-      setIsFavorite(false);
-      return;
-    }
+    refreshPreferenceState({ silent: true });
+  }, [isAuthenticated, productId, product?.slug]);
 
-    const productId = getProductId(product);
-    const favorites = readLocalArray(FAVORITES_KEY);
+  useEffect(() => {
+    const handlePreferencesUpdated = (event) => {
+      const preferences = event.detail || readCachedPreferences();
+      applyPreferencesToState(preferences);
+    };
 
-    setIsFavorite(
-      favorites.some((item) => {
-        return (
-          item.id === productId ||
-          item.productId === productId ||
-          item.slug === product.slug
-        );
-      })
-    );
-  }, [product]);
+    window.addEventListener(PREFERENCE_EVENT_NAME, handlePreferencesUpdated);
+
+    return () => {
+      window.removeEventListener(PREFERENCE_EVENT_NAME, handlePreferencesUpdated);
+    };
+  }, [productId, product?.slug]);
 
   const goToPreviousImage = () => {
     setActiveImageIndex((currentIndex) => {
@@ -272,7 +305,7 @@ function ProductDetailPage() {
     setMessage("Producto agregado a tu lista de pedido.");
   };
 
-  const handleSaveFavorite = () => {
+  const handleSaveFavorite = async () => {
     if (!product) return;
 
     if (!isAuthenticated) {
@@ -280,35 +313,70 @@ function ProductDetailPage() {
       return;
     }
 
-    const storedProduct = buildStoredProduct(product);
-    const currentFavorites = readLocalArray(FAVORITES_KEY);
-
-    const exists = currentFavorites.some((item) => {
-      return (
-        item.id === storedProduct.id ||
-        item.productId === storedProduct.productId ||
-        item.slug === storedProduct.slug
-      );
-    });
-
-    if (exists) {
-      const nextFavorites = currentFavorites.filter((item) => {
-        return !(
-          item.id === storedProduct.id ||
-          item.productId === storedProduct.productId ||
-          item.slug === storedProduct.slug
-        );
-      });
-
-      saveLocalArray(FAVORITES_KEY, nextFavorites);
-      setIsFavorite(false);
-      setMessage("Producto quitado de favoritos.");
+    if (!isMongoObjectId(productId)) {
+      setMessage("Este producto aún está siendo preparado. Intenta nuevamente más tarde.");
       return;
     }
 
-    saveLocalArray(FAVORITES_KEY, [...currentFavorites, storedProduct]);
-    setIsFavorite(true);
-    setMessage("Producto guardado como favorito.");
+    try {
+      setFavoriteLoading(true);
+      setMessage("");
+
+      const data = await toggleFavoriteProduct(productId);
+      applyPreferencesToState(data.preferences || readCachedPreferences());
+      const favoriteNow = isProductFavorite(data.preferences, productId);
+
+      setMessage(
+        favoriteNow ? "Producto guardado como favorito." : "Producto quitado de favoritos."
+      );
+    } catch (error) {
+      if (error.status === 401 || error.message?.toLowerCase().includes("token")) {
+        goToLogin();
+        return;
+      }
+
+      setMessage(error.message || "No se pudo actualizar favoritos.");
+    } finally {
+      setFavoriteLoading(false);
+    }
+  };
+
+  const handleToggleWishlist = async () => {
+    if (!product) return;
+
+    if (!isAuthenticated) {
+      goToLogin();
+      return;
+    }
+
+    if (!isMongoObjectId(productId)) {
+      setMessage("Este producto aún está siendo preparado. Intenta nuevamente más tarde.");
+      return;
+    }
+
+    try {
+      setWishlistLoading(true);
+      setMessage("");
+
+      const data = await toggleWishlistProduct(productId);
+      applyPreferencesToState(data.preferences || readCachedPreferences());
+      const wishlistNow = isProductInWishlist(data.preferences, productId);
+
+      setMessage(
+        wishlistNow
+          ? "Producto agregado a lista de deseos."
+          : "Producto quitado de lista de deseos."
+      );
+    } catch (error) {
+      if (error.status === 401 || error.message?.toLowerCase().includes("token")) {
+        goToLogin();
+        return;
+      }
+
+      setMessage(error.message || "No se pudo actualizar la lista de deseos.");
+    } finally {
+      setWishlistLoading(false);
+    }
   };
 
   if (!product) {
@@ -453,7 +521,7 @@ function ProductDetailPage() {
               </div>
 
               <p className="mt-3 text-3xl font-black text-[#2F2F2F]">
-                S/ {product.precio || product.price || 0}
+                S/ {getProductPrice(product)}
               </p>
             </div>
 
@@ -518,18 +586,39 @@ function ProductDetailPage() {
               className="smika-button-primary flex items-center gap-2"
             >
               <ShoppingBag size={18} />
-              Agregar a lista
+              Agregar a lista de pedido
             </button>
 
             <button
               type="button"
               onClick={handleSaveFavorite}
-              className={`smika-button flex items-center gap-2 ${
+              disabled={favoriteLoading}
+              className={`smika-button flex items-center gap-2 disabled:opacity-60 ${
                 isFavorite ? "bg-[#87CCC8] text-white" : ""
               }`}
             >
-              <Heart size={18} fill={isFavorite ? "currentColor" : "none"} />
+              {favoriteLoading ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <Heart size={18} fill={isFavorite ? "currentColor" : "none"} />
+              )}
               {isFavorite ? "Favorito guardado" : "Guardar favorito"}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleToggleWishlist}
+              disabled={wishlistLoading}
+              className={`smika-button flex items-center gap-2 disabled:opacity-60 ${
+                isWishlist ? "bg-[#F7D9D8]" : ""
+              }`}
+            >
+              {wishlistLoading ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <ShoppingBag size={18} />
+              )}
+              {isWishlist ? "En lista de deseos" : "Lista de deseos"}
             </button>
           </div>
         </div>

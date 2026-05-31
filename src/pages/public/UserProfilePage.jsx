@@ -1,24 +1,30 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
-  Bell,
-  CalendarHeart,
   Heart,
+  Loader2,
   PackageCheck,
   ShoppingBag,
   Sparkles,
-  UserRound
+  Trash2
 } from "lucide-react";
 
 import UserRegisteredEventsSection from "../../components/event/UserRegisteredEventsSection";
+import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 import { useAdminData } from "../../context/AdminDataContext";
 import { useAuth } from "../../context/AuthContext";
 import { getPublicProducts } from "../../utils/publicProducts";
+import {
+  getMyPreferences,
+  isProductFavorite,
+  isProductInWishlist,
+  PREFERENCE_EVENT_NAME,
+  readCachedPreferences,
+  toggleFavoriteProduct,
+  toggleWishlistProduct
+} from "../../services/preferenceService";
 
-const FAVORITES_KEY = "smika_favorites_v1";
 const ORDER_LIST_KEY = "smika_order_list_v1";
-const REGISTERED_EVENTS_KEY = "smika_registered_events_v1";
-const EVENT_ALERTS_KEY = "smika_event_alerts_v1";
 
 function readLocalArray(key) {
   try {
@@ -31,182 +37,344 @@ function readLocalArray(key) {
   }
 }
 
-function getItemId(item = {}) {
-  return item.id || item.productId || item._id || item.slug || item.nombre || "";
+function saveLocalArray(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // No rompemos la página si localStorage está bloqueado.
+  }
 }
 
-function getItemImage(item = {}) {
-  const firstImage = Array.isArray(item.imagenes) ? item.imagenes[0] : null;
+function isMongoObjectId(value) {
+  return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
+}
 
-  if (typeof firstImage === "string") return firstImage;
+function getId(item) {
+  if (!item) return "";
+  if (typeof item === "string") return item;
+  return item._id || item.id || item.productId || "";
+}
+
+function getImageSource(image) {
+  if (!image) return "";
+  if (typeof image === "string") return image;
 
   return (
-    item.imagen ||
-    item.image ||
-    firstImage?.finalPreview ||
-    firstImage?.url ||
-    firstImage?.preview ||
+    image.finalPreview ||
+    image.url ||
+    image.preview ||
+    image.src ||
+    image.imagen ||
     ""
   );
 }
 
-function getItemSlug(item = {}) {
-  return item.slug || item.productId || item.id || item._id || "";
+function getProductImage(product) {
+  const firstImage = product?.imagenes?.[0];
+
+  return product?.imagen || product?.image || getImageSource(firstImage) || "";
 }
 
-function getProductId(product = {}) {
-  return product._id || product.id || product.productId || product.slug || "";
+function getProductPrice(product) {
+  return Number(product?.precioReferencial || product?.precio || product?.price || 0);
 }
 
 function normalizeText(text = "") {
-  return String(text || "")
+  return text
+    .toString()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
 }
 
+function getProductSeries(product) {
+  if (typeof product?.serie === "object" && product.serie !== null) {
+    return product.serie.nombre || "";
+  }
+
+  return product?.serieNombre || product?.serie || product?.series || "";
+}
+
+function getProductType(product) {
+  if (Array.isArray(product?.tiposProducto) && product.tiposProducto.length > 0) {
+    return product.tiposProducto.join(", ");
+  }
+
+  return product?.tipoProducto || product?.tipo || product?.type || "Producto";
+}
+
 function EmptyState({ title, description }) {
   return (
-    <div className="rounded-[28px] bg-[#F8F6F7] p-6 text-center">
-      <p className="font-black text-[#2F2F2F]">{title}</p>
+    <div className="rounded-[28px] bg-white p-6 text-center smika-shadow border border-[#87CCC8]/15">
+      <p className="text-lg font-black text-[#2F2F2F]">{title}</p>
       <p className="mt-2 text-sm text-gray-600 leading-6">{description}</p>
     </div>
   );
 }
 
-function ProductMiniCard({ item, actionLabel = "Ver producto" }) {
-  const slug = getItemSlug(item);
-  const image = getItemImage(item);
+function MiniProductCard({ product, badge, action, actionLabel, actionLoading }) {
+  const productId = getId(product);
+  const slug = product?.slug || productId;
+  const image = getProductImage(product);
 
   return (
-    <article className="rounded-[24px] border border-[#87CCC8]/20 bg-white p-4 smika-shadow">
-      <div className="flex gap-4">
-        <div className="h-20 w-20 shrink-0 overflow-hidden rounded-2xl bg-[#F8F6F7]">
+    <article className="rounded-[28px] bg-white p-4 smika-shadow border border-[#87CCC8]/15">
+      <Link to={`/productos/${slug}`} className="block">
+        <div className="aspect-square overflow-hidden rounded-3xl bg-[#F8F6F7]">
           {image ? (
-            <img
-              src={image}
-              alt={item.nombre || "Producto"}
-              className="h-full w-full object-contain p-2"
-              loading="lazy"
+            <CroppedImagePreview
+              image={image}
+              alt={product?.nombre || "Producto"}
+              className="h-full w-full"
+              rounded="rounded-3xl"
             />
           ) : (
-            <div className="flex h-full w-full items-center justify-center bg-[#87CCC8]/20 text-xs font-black">
+            <div className="flex h-full w-full items-center justify-center bg-[#87CCC8] text-white font-black">
               Smika
             </div>
           )}
         </div>
+      </Link>
 
-        <div className="min-w-0 flex-1">
-          <h4 className="line-clamp-2 font-black text-[#2F2F2F]">
-            {item.nombre || item.name || "Producto guardado"}
-          </h4>
+      <div className="mt-4">
+        {badge && (
+          <span className="rounded-full bg-[#F7D9D8] px-3 py-1 text-xs font-black">
+            {badge}
+          </span>
+        )}
 
-          <p className="mt-1 text-xs text-gray-500 line-clamp-1">
-            {item.serie || item.tipo || item.evento || "Smika Store"}
-          </p>
+        <Link to={`/productos/${slug}`}>
+          <h3 className="mt-3 line-clamp-2 text-base font-black hover:text-[#87CCC8]">
+            {product?.nombre || "Producto Smika"}
+          </h3>
+        </Link>
 
-          <p className="mt-2 text-sm font-black">
-            S/ {Number(item.precio || item.price || 0)}
-          </p>
+        <p className="mt-2 text-sm text-gray-500">
+          {getProductSeries(product) || getProductType(product)}
+        </p>
 
-          {slug && (
-            <Link
-              to={`/productos/${slug}`}
-              className="mt-3 inline-flex rounded-full bg-[#F7D9D8] px-4 py-2 text-xs font-black"
-            >
-              {actionLabel}
-            </Link>
+        <p className="mt-2 text-lg font-black">S/ {getProductPrice(product)}</p>
+
+        {action && (
+          <button
+            type="button"
+            onClick={() => action(product)}
+            disabled={actionLoading}
+            className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-[#F8F6F7] px-4 py-2 text-xs font-black disabled:opacity-60"
+          >
+            {actionLoading ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+            {actionLabel}
+          </button>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function OrderListCard({ item, onRemove }) {
+  const slug = item?.slug || item?.id || item?.productId || "";
+  const image = getProductImage(item);
+
+  return (
+    <article className="rounded-[28px] bg-white p-4 smika-shadow border border-[#87CCC8]/15">
+      <Link to={`/productos/${slug}`}>
+        <div className="aspect-square overflow-hidden rounded-3xl bg-[#F8F6F7]">
+          {image ? (
+            <CroppedImagePreview
+              image={image}
+              alt={item?.nombre || "Producto"}
+              className="h-full w-full"
+              rounded="rounded-3xl"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-[#87CCC8] text-white font-black">
+              Smika
+            </div>
           )}
         </div>
-      </div>
+      </Link>
+
+      <h3 className="mt-4 line-clamp-2 text-base font-black">
+        {item?.nombre || "Producto Smika"}
+      </h3>
+
+      <p className="mt-2 text-sm text-gray-500">
+        Cantidad: {item?.cantidad || 1}
+      </p>
+
+      <p className="mt-2 text-lg font-black">S/ {Number(item?.precio || 0)}</p>
+
+      <button
+        type="button"
+        onClick={() => onRemove(item)}
+        className="mt-4 flex w-full items-center justify-center gap-2 rounded-full bg-[#F8F6F7] px-4 py-2 text-xs font-black"
+      >
+        <Trash2 size={15} />
+        Quitar
+      </button>
     </article>
   );
 }
 
 function UserProfilePage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const auth = useAuth();
   const { products } = useAdminData();
 
-  const [favorites, setFavorites] = useState([]);
-  const [orderList, setOrderList] = useState([]);
-  const [registeredEvents, setRegisteredEvents] = useState([]);
-  const [eventAlerts, setEventAlerts] = useState([]);
+  const [preferences, setPreferences] = useState(() => readCachedPreferences());
+  const [orderList, setOrderList] = useState(() => readLocalArray(ORDER_LIST_KEY));
+  const [loading, setLoading] = useState(false);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [message, setMessage] = useState("");
 
   const user = auth?.user || auth?.currentUser || null;
   const isAuthenticated = Boolean(auth?.isAuthenticated || user);
 
-  const loadLocalData = () => {
-    setFavorites(readLocalArray(FAVORITES_KEY));
-    setOrderList(readLocalArray(ORDER_LIST_KEY));
-    setRegisteredEvents(readLocalArray(REGISTERED_EVENTS_KEY));
-    setEventAlerts(readLocalArray(EVENT_ALERTS_KEY));
+  const favoriteProducts = preferences?.productosFavoritos || [];
+  const wishlistProducts = preferences?.listaDeseos || [];
+  const favoriteSeries = preferences?.seriesFavoritas || [];
+
+  const publicProducts = useMemo(() => {
+    return getPublicProducts(products || []);
+  }, [products]);
+
+  const recommendedProducts = useMemo(() => {
+    const savedIds = new Set(
+      [...favoriteProducts, ...wishlistProducts]
+        .map((product) => getId(product) || product?.slug)
+        .filter(Boolean)
+    );
+
+    const savedSeries = new Set(
+      [...favoriteProducts, ...wishlistProducts, ...favoriteSeries]
+        .map((item) => normalizeText(getProductSeries(item) || item?.nombre || item?.serieNombre))
+        .filter(Boolean)
+    );
+
+    const savedTypes = new Set(
+      [...favoriteProducts, ...wishlistProducts]
+        .map((item) => normalizeText(getProductType(item)))
+        .filter(Boolean)
+    );
+
+    return publicProducts
+      .filter((product) => {
+        const id = getId(product) || product.slug;
+        if (savedIds.has(id)) return false;
+
+        const sameSeries = savedSeries.has(normalizeText(getProductSeries(product)));
+        const sameType = savedTypes.has(normalizeText(getProductType(product)));
+
+        return sameSeries || sameType || product.esDestacado || product.isFeatured;
+      })
+      .slice(0, 8);
+  }, [publicProducts, favoriteProducts, wishlistProducts, favoriteSeries]);
+
+  const goToLogin = () => {
+    navigate(
+      `/login?redirect=${encodeURIComponent(
+        location.pathname + location.search
+      )}`
+    );
+  };
+
+  const refreshPreferences = async () => {
+    if (!isAuthenticated) return;
+
+    try {
+      setLoading(true);
+      setMessage("");
+
+      const freshPreferences = await getMyPreferences();
+      setPreferences(freshPreferences);
+    } catch (error) {
+      if (error.status === 401 || error.message?.toLowerCase().includes("token")) {
+        goToLogin();
+        return;
+      }
+
+      setMessage(error.message || "No se pudieron cargar tus favoritos.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   useEffect(() => {
-    if (!isAuthenticated && !auth?.loadingAuth) {
-      navigate("/login?redirect=/mi-cuenta");
+    if (!isAuthenticated) {
+      goToLogin();
       return;
     }
 
-    loadLocalData();
+    refreshPreferences();
+  }, [isAuthenticated]);
 
-    const handleUpdate = () => loadLocalData();
+  useEffect(() => {
+    const handlePreferencesUpdated = (event) => {
+      setPreferences(event.detail || readCachedPreferences());
+    };
 
-    window.addEventListener("storage", handleUpdate);
-    window.addEventListener("smika:user-data-updated", handleUpdate);
+    window.addEventListener(PREFERENCE_EVENT_NAME, handlePreferencesUpdated);
 
     return () => {
-      window.removeEventListener("storage", handleUpdate);
-      window.removeEventListener("smika:user-data-updated", handleUpdate);
+      window.removeEventListener(PREFERENCE_EVENT_NAME, handlePreferencesUpdated);
     };
-  }, [isAuthenticated, auth?.loadingAuth, navigate]);
+  }, []);
 
-  const recommendedProducts = useMemo(() => {
-    const publicProducts = getPublicProducts(products || []);
+  const removeFavorite = async (product) => {
+    const productId = getId(product);
 
-    const favoriteIds = new Set(
-      favorites.map((item) => normalizeText(getItemId(item))).filter(Boolean)
-    );
+    if (!isMongoObjectId(productId)) {
+      setMessage("No se pudo identificar el producto favorito.");
+      return;
+    }
 
-    const favoriteSeries = new Set(
-      favorites.map((item) => normalizeText(item.serie)).filter(Boolean)
-    );
+    try {
+      setActionLoading(true);
+      const data = await toggleFavoriteProduct(productId);
+      setPreferences(data.preferences || readCachedPreferences());
+      setMessage("Producto quitado de favoritos.");
+    } catch (error) {
+      setMessage(error.message || "No se pudo quitar el favorito.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-    const favoriteTypes = new Set(
-      favorites.map((item) => normalizeText(item.tipo)).filter(Boolean)
-    );
+  const removeWishlist = async (product) => {
+    const productId = getId(product);
 
-    const matches = publicProducts.filter((product) => {
-      const productId = normalizeText(getProductId(product));
-      const productSerie = normalizeText(product.serieNombre || product.serie || product.series);
-      const productType = normalizeText(product.tipoProducto || product.tipo || product.type);
+    if (!isMongoObjectId(productId)) {
+      setMessage("No se pudo identificar el producto de la lista de deseos.");
+      return;
+    }
 
-      if (favoriteIds.has(productId)) return false;
+    try {
+      setActionLoading(true);
+      const data = await toggleWishlistProduct(productId);
+      setPreferences(data.preferences || readCachedPreferences());
+      setMessage("Producto quitado de lista de deseos.");
+    } catch (error) {
+      setMessage(error.message || "No se pudo quitar de lista de deseos.");
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-      return favoriteSeries.has(productSerie) || favoriteTypes.has(productType);
+  const removeOrderItem = (item) => {
+    const nextList = orderList.filter((currentItem) => {
+      return !(
+        currentItem.id === item.id ||
+        currentItem.productId === item.productId ||
+        currentItem.slug === item.slug
+      );
     });
 
-    const fallback = publicProducts.filter((product) => {
-      const productId = normalizeText(getProductId(product));
-      return !favoriteIds.has(productId);
-    });
-
-    return (matches.length > 0 ? matches : fallback).slice(0, 6);
-  }, [products, favorites]);
-
-  if (auth?.loadingAuth) {
-    return (
-      <section className="container-smika py-12">
-        <div className="rounded-[32px] bg-[#F8F6F7] p-8 text-center font-black">
-          Cargando tu cuenta...
-        </div>
-      </section>
-    );
-  }
-
-  if (!isAuthenticated) return null;
+    setOrderList(nextList);
+    saveLocalArray(ORDER_LIST_KEY, nextList);
+    setMessage("Producto quitado de tu lista de pedido.");
+  };
 
   return (
     <>
@@ -214,170 +382,190 @@ function UserProfilePage() {
         <div className="rounded-[32px] bg-[#F8F6F7] p-8">
           <p className="text-[#87CCC8] font-black">Mi cuenta</p>
 
-          <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
-            <div>
-              <h2 className="text-4xl font-black">
-                Perfil, pedidos y favoritos
-              </h2>
+          <h2 className="text-4xl font-black mt-2">
+            Perfil, pedidos y favoritos
+          </h2>
 
-              <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-                Hola {user?.alias || user?.nombre || "Smika fan"}. Aquí puedes ver tus pedidos,
-                lista de deseos, eventos guardados, avisos y recomendaciones.
-              </p>
-            </div>
-
-            <Link
-              to="/mi-cuenta/configuracion"
-              className="rounded-full bg-[#F7D9D8] px-5 py-3 text-sm font-black"
-            >
-              Editar perfil
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="container-smika pb-6">
-        <div className="grid gap-4 md:grid-cols-5">
-          <div className="smika-card smika-shadow p-5">
-            <ShoppingBag size={22} className="text-[#87CCC8]" />
-            <p className="mt-2 text-2xl font-black">{orderList.length}</p>
-            <p className="text-xs font-black text-gray-500">Pedidos / lista</p>
-          </div>
-
-          <div className="smika-card smika-shadow p-5">
-            <Heart size={22} className="text-[#D1B0C7]" />
-            <p className="mt-2 text-2xl font-black">{favorites.length}</p>
-            <p className="text-xs font-black text-gray-500">Favoritos</p>
-          </div>
-
-          <div className="smika-card smika-shadow p-5">
-            <Sparkles size={22} className="text-[#87CCC8]" />
-            <p className="mt-2 text-2xl font-black">{recommendedProducts.length}</p>
-            <p className="text-xs font-black text-gray-500">Recomendados</p>
-          </div>
-
-          <div className="smika-card smika-shadow p-5">
-            <CalendarHeart size={22} className="text-[#D1B0C7]" />
-            <p className="mt-2 text-2xl font-black">{registeredEvents.length}</p>
-            <p className="text-xs font-black text-gray-500">Eventos</p>
-          </div>
-
-          <div className="smika-card smika-shadow p-5">
-            <Bell size={22} className="text-[#87CCC8]" />
-            <p className="mt-2 text-2xl font-black">{eventAlerts.length}</p>
-            <p className="text-xs font-black text-gray-500">Avisos</p>
-          </div>
-        </div>
-      </section>
-
-      <section className="container-smika py-8">
-        <div className="grid gap-6 lg:grid-cols-[1fr_1fr]">
-          <div className="smika-card smika-shadow p-6">
-            <p className="text-[#87CCC8] font-black">Pedidos</p>
-            <h3 className="mt-2 text-2xl font-black">Mis pedidos / lista</h3>
-            <p className="mt-2 text-sm text-gray-600 leading-6">
-              Aquí se muestran los productos que agregaste a tu lista de pedido.
-            </p>
-
-            <div className="mt-5 grid gap-4">
-              {orderList.length > 0 ? (
-                orderList.slice(0, 4).map((item) => (
-                  <ProductMiniCard key={getItemId(item)} item={item} />
-                ))
-              ) : (
-                <EmptyState
-                  title="Aún no tienes productos en lista"
-                  description="Agrega productos desde el catálogo para preparar tu pedido."
-                />
-              )}
-            </div>
-
-            <Link
-              to="/lista-pedido"
-              className="mt-5 inline-flex rounded-full bg-[#87CCC8] px-5 py-3 text-sm font-black text-white"
-            >
-              Ver lista de pedido
-            </Link>
-          </div>
-
-          <div className="smika-card smika-shadow p-6">
-            <p className="text-[#D1B0C7] font-black">Favoritos</p>
-            <h3 className="mt-2 text-2xl font-black">Lista de deseos</h3>
-            <p className="mt-2 text-sm text-gray-600 leading-6">
-              Productos guardados por cliente, admin o subadmin cuando navegan la tienda.
-            </p>
-
-            <div className="mt-5 grid gap-4">
-              {favorites.length > 0 ? (
-                favorites.slice(0, 6).map((item) => (
-                  <ProductMiniCard
-                    key={`${getItemId(item)}-${item.savedAt || "fav"}`}
-                    item={item}
-                  />
-                ))
-              ) : (
-                <EmptyState
-                  title="Todavía no guardaste favoritos"
-                  description="Presiona el corazón en un producto para verlo aquí."
-                />
-              )}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="container-smika py-8">
-        <div className="smika-card smika-shadow p-6">
-          <p className="text-[#87CCC8] font-black">Para ti</p>
-          <h3 className="mt-2 text-2xl font-black">Recomendados</h3>
-          <p className="mt-2 text-sm text-gray-600 leading-6">
-            Sugerencias basadas en tus favoritos. Si aún no tienes favoritos, verás productos recientes.
+          <p className="mt-3 text-gray-600 max-w-3xl leading-7">
+            Aquí puedes revisar tus pedidos, productos favoritos, lista de deseos,
+            recomendaciones, notificaciones y eventos registrados.
           </p>
-
-          <div className="mt-5 grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {recommendedProducts.length > 0 ? (
-              recommendedProducts.map((product) => (
-                <ProductMiniCard
-                  key={getProductId(product)}
-                  item={{
-                    ...product,
-                    id: getProductId(product),
-                    slug: product.slug || getProductId(product),
-                    precio: product.precioReferencial || product.precio || product.price || 0,
-                    tipo: product.tipoProducto || product.tipo || "Producto",
-                    serie: product.serieNombre || product.serie || "",
-                    imagenes: product.imagenes || []
-                  }}
-                />
-              ))
-            ) : (
-              <div className="md:col-span-2 lg:col-span-3">
-                <EmptyState
-                  title="No hay recomendaciones todavía"
-                  description="Cuando existan productos activos o favoritos, se mostrarán aquí."
-                />
-              </div>
-            )}
-          </div>
         </div>
+
+        {message && (
+          <div className="mt-6 rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
+            {message}
+          </div>
+        )}
+
+        {loading && (
+          <div className="mt-6 flex items-center gap-2 rounded-[24px] bg-white px-5 py-4 text-sm font-black smika-shadow">
+            <Loader2 size={18} className="animate-spin text-[#87CCC8]" />
+            Cargando tus datos...
+          </div>
+        )}
       </section>
 
       <UserRegisteredEventsSection title="Mis eventos registrados" />
 
-      <section className="container-smika py-8">
-        <div className="smika-card smika-shadow p-6">
-          <div className="flex items-center gap-3">
-            <UserRound className="text-[#87CCC8]" size={24} />
-            <div>
-              <p className="text-[#87CCC8] font-black">Soporte</p>
-              <h3 className="text-2xl font-black">Incidencias de clientes</h3>
+      <section className="container-smika py-10 space-y-10">
+        <div className="grid gap-6 md:grid-cols-3">
+          <div className="smika-card smika-shadow p-6">
+            <div className="flex items-center gap-2 text-[#87CCC8]">
+              <PackageCheck size={20} />
+              <p className="font-black">Pedidos</p>
             </div>
+
+            <h3 className="mt-2 text-2xl font-black">Mis pedidos</h3>
+            <p className="mt-2 text-gray-600">
+              Productos agregados a tu lista de pedido para coordinar compra.
+            </p>
+
+            <p className="mt-4 text-3xl font-black">{orderList.length}</p>
           </div>
 
-          <p className="mt-3 text-sm text-gray-600 leading-6">
-            Si encuentras una falla, algo que no carga o quieres enviar un comentario sobre la página, usa el botón flotante de ayuda.
-          </p>
+          <div className="smika-card smika-shadow p-6">
+            <div className="flex items-center gap-2 text-[#D1B0C7]">
+              <Heart size={20} />
+              <p className="font-black">Favoritos</p>
+            </div>
+
+            <h3 className="mt-2 text-2xl font-black">Mis favoritos</h3>
+            <p className="mt-2 text-gray-600">
+              Productos guardados al presionar el corazón.
+            </p>
+
+            <p className="mt-4 text-3xl font-black">{favoriteProducts.length}</p>
+          </div>
+
+          <div className="smika-card smika-shadow p-6">
+            <div className="flex items-center gap-2 text-[#87CCC8]">
+              <Sparkles size={20} />
+              <p className="font-black">Para ti</p>
+            </div>
+
+            <h3 className="mt-2 text-2xl font-black">Recomendados</h3>
+            <p className="mt-2 text-gray-600">
+              Productos sugeridos según tus favoritos y lista de deseos.
+            </p>
+
+            <p className="mt-4 text-3xl font-black">{recommendedProducts.length}</p>
+          </div>
         </div>
+
+        <section>
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div>
+              <p className="text-[#D1B0C7] font-black">Favoritos</p>
+              <h3 className="mt-1 text-3xl font-black">Productos con corazón</h3>
+            </div>
+
+            <button
+              type="button"
+              onClick={refreshPreferences}
+              className="rounded-full bg-[#F8F6F7] px-5 py-3 text-sm font-black"
+            >
+              Actualizar
+            </button>
+          </div>
+
+          <div className="mt-6">
+            {favoriteProducts.length === 0 ? (
+              <EmptyState
+                title="Aún no tienes favoritos"
+                description="Presiona el corazón en un producto para guardarlo aquí."
+              />
+            ) : (
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                {favoriteProducts.map((product) => (
+                  <MiniProductCard
+                    key={getId(product) || product.slug}
+                    product={product}
+                    badge="Favorito"
+                    action={removeFavorite}
+                    actionLabel="Quitar favorito"
+                    actionLoading={actionLoading}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <p className="text-[#87CCC8] font-black">Lista de deseos</p>
+          <h3 className="mt-1 text-3xl font-black">Productos guardados para después</h3>
+
+          <div className="mt-6">
+            {wishlistProducts.length === 0 ? (
+              <EmptyState
+                title="Tu lista de deseos está vacía"
+                description="Desde el detalle de producto puedes agregar productos a esta lista."
+              />
+            ) : (
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                {wishlistProducts.map((product) => (
+                  <MiniProductCard
+                    key={getId(product) || product.slug}
+                    product={product}
+                    badge="Lista de deseos"
+                    action={removeWishlist}
+                    actionLabel="Quitar de deseos"
+                    actionLoading={actionLoading}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <p className="text-[#87CCC8] font-black">Pedidos</p>
+          <h3 className="mt-1 text-3xl font-black">Mi lista de pedido</h3>
+
+          <div className="mt-6">
+            {orderList.length === 0 ? (
+              <EmptyState
+                title="No tienes productos en tu lista de pedido"
+                description="Agrega productos desde el catálogo o desde el detalle del producto."
+              />
+            ) : (
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                {orderList.map((item) => (
+                  <OrderListCard
+                    key={item.id || item.productId || item.slug}
+                    item={item}
+                    onRemove={removeOrderItem}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <p className="text-[#D1B0C7] font-black">Para ti</p>
+          <h3 className="mt-1 text-3xl font-black">Recomendados</h3>
+
+          <div className="mt-6">
+            {recommendedProducts.length === 0 ? (
+              <EmptyState
+                title="Aún no hay recomendaciones"
+                description="Guarda productos o series como favoritos para mejorar las sugerencias."
+              />
+            ) : (
+              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
+                {recommendedProducts.map((product) => (
+                  <MiniProductCard
+                    key={getId(product) || product.slug}
+                    product={product}
+                    badge="Recomendado"
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        </section>
       </section>
     </>
   );
