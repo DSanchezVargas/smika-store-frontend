@@ -782,28 +782,7 @@ const defaultAdminData = {
 };
 
 function getInitialAdminData() {
-  try {
-    const storedData = localStorage.getItem(STORAGE_KEY);
-
-    if (!storedData) return defaultAdminData;
-
-    const parsedData = JSON.parse(storedData);
-
-    return {
-      ...defaultAdminData,
-      ...parsedData,
-      products: [],
-      events: [],
-      series: [],
-      characters: [],
-      categories: [],
-      creators: [],
-      origins: []
-    };
-  } catch (error) {
-    console.error("No se pudo leer la información local de Smika.", error);
-    return defaultAdminData;
-  }
+  return defaultAdminData;
 }
 
 export function AdminDataProvider({ children }) {
@@ -1041,15 +1020,13 @@ export function AdminDataProvider({ children }) {
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(adminData));
+      localStorage.removeItem(STORAGE_KEY);
       setStorageError("");
     } catch (error) {
-      console.error("No se pudo guardar la información local de Smika.", error);
-      setStorageError(
-        "No se pudo guardar localmente. Puede que el navegador haya llegado al límite de almacenamiento."
-      );
+      console.error("No se pudo limpiar la información local de Smika.", error);
+      setStorageError("");
     }
-  }, [adminData]);
+  }, []);
 
   const createProduct = async (payload) => {
     const apiPayload = buildProductPayloadForApi(payload, {
