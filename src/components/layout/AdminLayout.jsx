@@ -18,74 +18,104 @@ import {
   X
 } from "lucide-react";
 
+import { useAuth } from "../../context/AuthContext";
+
 const adminNavigation = [
   {
     label: "Dashboard",
     path: "/admin",
     icon: LayoutDashboard,
-    end: true
-  },
-  {
-    label: "Productos",
-    path: "/admin/productos",
-    icon: Boxes
-  },
-  {
-    label: "Pedidos",
-    path: "/admin/pedidos",
-    icon: BarChart3
+    end: true,
+    priorityGroup: "base"
   },
   {
     label: "Eventos",
     path: "/admin/eventos",
-    icon: CalendarDays
+    icon: CalendarDays,
+    priorityGroup: "principal"
   },
   {
     label: "Series / Historias",
     path: "/admin/series",
-    icon: Sparkles
+    icon: Sparkles,
+    priorityGroup: "principal"
+  },
+  {
+    label: "Productos",
+    path: "/admin/productos",
+    icon: Boxes,
+    priorityGroup: "principal"
   },
   {
     label: "Categorías",
     path: "/admin/categorias",
-    icon: FolderTree
-  },
-  {
-    label: "Personajes",
-    path: "/admin/personajes",
-    icon: UserRound
+    icon: FolderTree,
+    priorityGroup: "principal"
   },
   {
     label: "Creadores",
     path: "/admin/creadores",
-    icon: Tags
+    icon: Tags,
+    priorityGroup: "principal"
+  },
+  {
+    label: "Personajes",
+    path: "/admin/personajes",
+    icon: UserRound,
+    priorityGroup: "principal"
   },
   {
     label: "Orígenes",
     path: "/admin/origenes",
-    icon: Globe2
+    icon: Globe2,
+    priorityGroup: "principal"
+  },
+  {
+    label: "Pedidos",
+    path: "/admin/pedidos",
+    icon: BarChart3,
+    priorityGroup: "principal"
   },
   {
     label: "Usuarios",
     path: "/admin/usuarios",
-    icon: Users
+    icon: Users,
+    adminOnly: true,
+    priorityGroup: "admin"
   },
   {
     label: "Subadmins",
     path: "/admin/subadmins",
-    icon: ShieldCheck
+    icon: ShieldCheck,
+    adminOnly: true,
+    priorityGroup: "admin"
   },
   {
     label: "Configuración",
     path: "/admin/configuracion",
-    icon: Settings
+    icon: Settings,
+    adminOnly: true,
+    priorityGroup: "admin"
   }
 ];
 
+function getVisibleNavigation(auth) {
+  const role = auth?.user?.role || "";
+  const isAdmin = auth?.isAdmin || role === "admin";
+
+  return adminNavigation.filter((item) => {
+    if (item.adminOnly && !isAdmin) return false;
+    return true;
+  });
+}
+
 function AdminNavigationList({ onNavigate }) {
+  const auth = useAuth();
+  const visibleNavigation = getVisibleNavigation(auth);
+
   return (
     <nav className="space-y-1">
-      {adminNavigation.map((item) => {
+      {visibleNavigation.map((item) => {
         const Icon = item.icon;
 
         return (
@@ -224,7 +254,7 @@ function AdminLayout() {
               </h3>
 
               <p className="mt-2 text-sm text-gray-600 leading-6">
-                Usa este menú cuando estés en pantalla dividida, tablet o móvil.
+                Elige un módulo para gestionar la tienda.
               </p>
             </div>
 
