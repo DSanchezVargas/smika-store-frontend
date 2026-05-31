@@ -1,15 +1,14 @@
 import { useMemo, useState } from "react";
 import {
   ArrowLeft,
+  CalendarDays,
   Image as ImageIcon,
   Loader2,
   Pencil,
   Plus,
   Power,
   RefreshCw,
-  Save,
-  Trash2,
-  UsersRound
+  Save
 } from "lucide-react";
 
 import AutoCarousel from "../../components/common/AutoCarousel";
@@ -17,49 +16,55 @@ import ImageDropzone from "../../components/admin/ImageDropzone";
 import { useAdminData } from "../../context/AdminDataContext";
 
 const initialForm = {
-  nombre: "",
+  titulo: "",
   descripcion: "",
-  categoriaNombre: "Manhwa",
-  origenNombre: "Corea",
-  genero: "",
-  destacada: false,
-  activa: true,
-  orden: 0
+  categoria: "",
+  categoriaNombre: "Eventos",
+  origen: "",
+  origenNombre: "Variado",
+  pais: "V",
+  tipoEvento: "Otro",
+  fechaInicio: "",
+  fechaFin: "",
+  estado: "proximo",
+  destacado: false,
+  activo: true,
+  series: [],
+  seriesNombre: [],
+  productos: []
 };
 
-const baseCategories = [
-  "Manga",
-  "Manhwa",
-  "Manhua",
-  "Novela",
-  "Webtoon",
-  "Serie",
-  "Historia"
+const eventStatusOptions = [
+  {
+    value: "proximo",
+    label: "Próximo"
+  },
+  {
+    value: "activo",
+    label: "Activo"
+  },
+  {
+    value: "finalizado",
+    label: "Finalizado"
+  },
+  {
+    value: "cancelado",
+    label: "Cancelado"
+  }
 ];
 
-const baseCountries = ["China", "Corea", "Japón", "Variado"];
-
-const baseGenres = [
-  "BL",
-  "Romance",
-  "Fantasía",
-  "Drama",
-  "Acción",
-  "Isekai",
-  "Webtoon",
-  "Comedia",
-  "Aventura"
+const eventTypeOptions = [
+  "Café evento",
+  "Pop up",
+  "Feria",
+  "Preventa",
+  "Lanzamiento",
+  "Colaboración",
+  "Otro"
 ];
 
-function createSlug(text = "") {
-  return text
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
+function getId(item) {
+  return item?._id || item?.id || "";
 }
 
 function normalizeText(text = "") {
@@ -69,10 +74,6 @@ function normalizeText(text = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
-}
-
-function getId(item) {
-  return item?._id || item?.id || "";
 }
 
 function getImageSource(image) {
@@ -128,7 +129,6 @@ async function imageToPersistedSource(image) {
 
 async function prepareImagesForPayload(images = []) {
   const preparedImages = await Promise.all(images.map(imageToPersistedSource));
-
   const seenImages = new Set();
 
   return preparedImages
@@ -142,59 +142,13 @@ async function prepareImagesForPayload(images = []) {
     });
 }
 
-function uniqueTextOptions(values = []) {
-  const map = new Map();
-
-  values
-    .map((value) => value?.toString().trim())
-    .filter(Boolean)
-    .forEach((value) => {
-      const key = normalizeText(value);
-
-      if (!map.has(key)) {
-        map.set(key, value);
-      }
-    });
-
-  return [...map.values()].sort((a, b) => a.localeCompare(b));
-}
-
-function getCountryCodeFromOrigin(originName = "") {
-  const cleanOrigin = normalizeText(originName);
-
-  if (cleanOrigin === "china") return "CN";
-  if (cleanOrigin === "corea") return "KR";
-  if (cleanOrigin === "japon" || cleanOrigin === "japón") return "JP";
-  if (cleanOrigin === "variado") return "V";
-
-  return originName.trim();
-}
-
-function getSeriesStatus(serie) {
-  if (serie.activo === false || serie.activa === false) return "Inactiva";
-  if (serie.destacada) return "Destacada";
-  return "Activa";
-}
-
-function getCoverImageFromSerie(serie) {
-  return getImageSource(serie?.imagen);
-}
-
-function getAdditionalImagesFromSerie(serie) {
-  const coverImage = getCoverImageFromSerie(serie);
-
-  const images = Array.isArray(serie?.imagenes)
-    ? serie.imagenes.map(getImageSource).filter(Boolean)
-    : [];
-
-  return images.filter((image) => image !== coverImage);
-}
-
 function createEditableImageFromSource(src, index = 0) {
+  if (!src) return null;
+
   return {
-    id: `serie-image-${Date.now()}-${index}-${Math.random()}`,
-    name: `imagen-serie-${index + 1}.jpg`,
-    originalName: `imagen-serie-${index + 1}.jpg`,
+    id: `event-image-${Date.now()}-${index}-${Math.random()}`,
+    name: `imagen-evento-${index + 1}.jpg`,
+    originalName: `imagen-evento-${index + 1}.jpg`,
     preview: src,
     finalPreview: src,
     url: src,
@@ -224,281 +178,333 @@ function createEditableImageFromSource(src, index = 0) {
   };
 }
 
-function CreatableDropdown({
-  label,
-  value,
-  options = [],
-  onChange,
-  placeholder = "Escribe o selecciona",
-  createLabel,
-  helperText = ""
-}) {
-  const [isOpen, setIsOpen] = useState(false);
+function formatDateInput(value) {
+  if (!value) return "";
 
-  const cleanValue = value?.trim() || "";
+  const date = new Date(value);
 
-  const filteredOptions = useMemo(() => {
-    const search = normalizeText(cleanValue);
+  if (Number.isNaN(date.getTime())) return "";
 
-    if (!search) return options;
+  return date.toISOString().slice(0, 10);
+}
 
-    return options.filter((option) => normalizeText(option).includes(search));
-  }, [options, cleanValue]);
+function formatDateText(value) {
+  if (!value) return "Sin fecha";
 
-  const alreadyExists = options.some(
-    (option) => normalizeText(option) === normalizeText(cleanValue)
-  );
+  const date = new Date(value);
 
-  const shouldShowCreate = cleanValue && !alreadyExists;
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
 
+  return date.toLocaleDateString("es-PE", {
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function getStatusLabel(value) {
   return (
-    <label className="relative grid gap-2 text-sm font-black">
-      {label}
-
-      <input
-        value={value}
-        onFocus={() => setIsOpen(true)}
-        onChange={(event) => {
-          onChange(event.target.value);
-          setIsOpen(true);
-        }}
-        onBlur={() => {
-          window.setTimeout(() => setIsOpen(false), 120);
-        }}
-        className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-        placeholder={placeholder}
-      />
-
-      {helperText && (
-        <span className="text-xs font-semibold text-gray-500">
-          {helperText}
-        </span>
-      )}
-
-      {isOpen && (
-        <div className="absolute left-0 right-0 top-[72px] z-30 max-h-64 overflow-auto rounded-2xl border border-[#87CCC8]/30 bg-white p-2 shadow-xl">
-          {filteredOptions.length > 0 ? (
-            filteredOptions.map((option) => (
-              <button
-                key={option}
-                type="button"
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  onChange(option);
-                  setIsOpen(false);
-                }}
-                className="w-full rounded-xl px-3 py-2 text-left text-sm font-bold hover:bg-[#F7D9D8]"
-              >
-                {option}
-              </button>
-            ))
-          ) : (
-            <p className="px-3 py-2 text-sm text-gray-500">
-              No hay coincidencias.
-            </p>
-          )}
-
-          {shouldShowCreate && (
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onChange(cleanValue);
-                setIsOpen(false);
-              }}
-              className="mt-2 w-full rounded-xl bg-[#87CCC8]/20 px-3 py-2 text-left text-sm font-black text-[#2F2F2F]"
-            >
-              {createLabel ? createLabel(cleanValue) : `Agregar “${cleanValue}”`}
-            </button>
-          )}
-        </div>
-      )}
-    </label>
+    eventStatusOptions.find((option) => option.value === value)?.label ||
+    value ||
+    "Próximo"
   );
 }
 
-function AuthorSelector({
-  authorDraft,
-  setAuthorDraft,
-  selectedAuthors,
-  setSelectedAuthors,
-  authorOptions
-}) {
-  const availableAuthors = useMemo(() => {
-    return authorOptions.filter(
-      (option) =>
-        !selectedAuthors.some(
-          (author) => normalizeText(author) === normalizeText(option)
-        )
-    );
-  }, [authorOptions, selectedAuthors]);
+function getCountryCodeFromOrigin(originName = "") {
+  const cleanOrigin = normalizeText(originName);
 
-  const handleAddAuthor = (authorName) => {
-    const cleanAuthor = authorName?.trim();
+  if (cleanOrigin === "china") return "CN";
+  if (cleanOrigin === "corea") return "KR";
+  if (cleanOrigin === "japon" || cleanOrigin === "japón") return "JP";
+  if (cleanOrigin === "variado") return "V";
 
-    if (!cleanAuthor) return;
+  return originName.trim() || "V";
+}
 
-    setSelectedAuthors((currentAuthors) => {
-      const exists = currentAuthors.some(
-        (author) => normalizeText(author) === normalizeText(cleanAuthor)
-      );
+function uniqueTextOptions(values = []) {
+  const map = new Map();
 
-      if (exists) return currentAuthors;
+  values
+    .map((value) => value?.toString().trim())
+    .filter(Boolean)
+    .forEach((value) => {
+      const key = normalizeText(value);
 
-      return [...currentAuthors, cleanAuthor];
+      if (!map.has(key)) {
+        map.set(key, value);
+      }
     });
 
-    setAuthorDraft("");
+  return [...map.values()].sort((a, b) => a.localeCompare(b));
+}
+
+function EventMultiSelect({
+  title,
+  description,
+  options,
+  selectedIds,
+  onChange,
+  getLabel,
+  emptyText = "No hay opciones disponibles."
+}) {
+  const [search, setSearch] = useState("");
+
+  const filteredOptions = useMemo(() => {
+    const cleanSearch = normalizeText(search);
+
+    if (!cleanSearch) return options;
+
+    return options.filter((item) => normalizeText(getLabel(item)).includes(cleanSearch));
+  }, [options, search, getLabel]);
+
+  const toggleOption = (id) => {
+    onChange((currentIds) => {
+      if (currentIds.includes(id)) {
+        return currentIds.filter((currentId) => currentId !== id);
+      }
+
+      return [...currentIds, id];
+    });
   };
 
   return (
-    <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
-      <p className="font-black">Autores / Creadores</p>
+    <div className="rounded-[28px] bg-[#F8F6F7] p-5">
+      <p className="font-black">{title}</p>
 
-      <p className="mt-1 text-sm text-gray-600 leading-6">
-        Una serie puede tener más de un autor/creador. Si escribes uno nuevo,
-        aparecerá como “Agregar ___ a Autores / Creadores” y quedará enlazado a
-        esta serie.
-      </p>
+      {description && (
+        <p className="mt-1 text-sm text-gray-600 leading-6">
+          {description}
+        </p>
+      )}
 
-      <div className="mt-4">
-        <CreatableDropdown
-          label="Agregar autor/creador"
-          value={authorDraft}
-          onChange={setAuthorDraft}
-          options={availableAuthors}
-          placeholder="Busca o escribe un autor/creador"
-          createLabel={(name) => `Agregar “${name}” a Autores / Creadores`}
-          helperText="Escribe o selecciona y luego presiona Agregar."
-        />
+      <input
+        value={search}
+        onChange={(event) => setSearch(event.target.value)}
+        className="mt-4 w-full rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3 outline-none"
+        placeholder="Buscar..."
+      />
 
-        <button
-          type="button"
-          onClick={() => handleAddAuthor(authorDraft)}
-          className="mt-3 rounded-full bg-white px-5 py-3 text-sm font-black"
-        >
-          Agregar autor/creador
-        </button>
+      <div className="mt-4 max-h-72 overflow-auto rounded-2xl bg-white p-3">
+        {filteredOptions.length > 0 ? (
+          filteredOptions.map((item) => {
+            const id = getId(item);
+            const checked = selectedIds.includes(id);
+
+            return (
+              <label
+                key={id}
+                className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold hover:bg-[#F7D9D8]/50"
+              >
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  onChange={() => toggleOption(id)}
+                  className="h-4 w-4"
+                />
+
+                <span>{getLabel(item)}</span>
+              </label>
+            );
+          })
+        ) : (
+          <p className="px-3 py-4 text-sm text-gray-500">
+            {emptyText}
+          </p>
+        )}
       </div>
 
-      {selectedAuthors.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2">
-          {selectedAuthors.map((author) => (
-            <span
-              key={author}
-              className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-sm font-black"
-            >
-              {author}
-
-              <button
-                type="button"
-                onClick={() =>
-                  setSelectedAuthors((currentAuthors) =>
-                    currentAuthors.filter(
-                      (item) => normalizeText(item) !== normalizeText(author)
-                    )
-                  )
-                }
-                className="text-red-500"
-                title="Quitar autor"
-              >
-                <Trash2 size={15} />
-              </button>
-            </span>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-4 text-sm text-gray-500">
-          Todavía no agregaste autores/creadores.
+      {selectedIds.length > 0 && (
+        <p className="mt-3 text-xs font-black text-[#87CCC8]">
+          Seleccionados: {selectedIds.length}
         </p>
       )}
     </div>
   );
 }
 
-function AdminSeriesPage() {
+function AdminEventsPage() {
   const {
+    events,
     series,
-    loadingSeries,
-    seriesLoadError,
-    refreshSeries,
-    createSeriesFull,
-    updateSeriesFull,
-    toggleSeriesStatus
+    products,
+    categories,
+    origins,
+    loadingEvents,
+    eventsLoadError,
+    refreshEvents,
+    createEventFull,
+    updateEventFull,
+    toggleEventStatus
   } = useAdminData();
 
   const [view, setView] = useState("list");
-  const [editingSeries, setEditingSeries] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);
   const [form, setForm] = useState(initialForm);
 
   const [coverImages, setCoverImages] = useState([]);
   const [carouselImages, setCarouselImages] = useState([]);
   const [imagesTouched, setImagesTouched] = useState(false);
 
-  const [selectedAuthors, setSelectedAuthors] = useState([]);
-  const [authorDraft, setAuthorDraft] = useState("");
-
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const sortedSeries = useMemo(() => {
-    return [...(series || [])].sort((a, b) => {
+  const sortedEvents = useMemo(() => {
+    return [...(events || [])].sort((a, b) => {
       if (a.activo !== b.activo) return a.activo ? -1 : 1;
-      return (a.nombre || "").localeCompare(b.nombre || "");
+
+      const dateA = new Date(a.fechaInicio || a.createdAt || 0).getTime();
+      const dateB = new Date(b.fechaInicio || b.createdAt || 0).getTime();
+
+      return dateB - dateA;
     });
+  }, [events]);
+
+  const activeSeries = useMemo(() => {
+    return (series || [])
+      .filter((serie) => serie.activo !== false && serie.activa !== false)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [series]);
+
+  const activeProducts = useMemo(() => {
+    return (products || [])
+      .filter((product) => product.activo !== false)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [products]);
+
+  const activeCategories = useMemo(() => {
+    return (categories || [])
+      .filter((category) => category.activa !== false && category.activo !== false)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [categories]);
+
+  const activeOrigins = useMemo(() => {
+    return (origins || [])
+      .filter((origin) => origin.activo !== false)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [origins]);
 
   const categoryOptions = useMemo(() => {
-    const dynamicCategories = (series || []).flatMap((serie) => [
-      serie.categoriaNombre,
-      serie.categoriaPrincipalNombre,
-      serie.categoria
+    return uniqueTextOptions([
+      "Eventos",
+      "Café evento",
+      "Pop up",
+      "Feria",
+      ...activeCategories.map((category) => category.nombre)
     ]);
+  }, [activeCategories]);
 
-    return uniqueTextOptions([...baseCategories, ...dynamicCategories]);
-  }, [series]);
-
-  const countryOptions = useMemo(() => {
-    const dynamicCountries = (series || []).flatMap((serie) => [
-      serie.origenNombre,
-      serie.pais
+  const originOptions = useMemo(() => {
+    return uniqueTextOptions([
+      "China",
+      "Corea",
+      "Japón",
+      "Variado",
+      ...activeOrigins.map((origin) => origin.nombre)
     ]);
+  }, [activeOrigins]);
 
-    return uniqueTextOptions([...baseCountries, ...dynamicCountries]);
-  }, [series]);
+  const resetForm = () => {
+    setView("list");
+    setEditingEvent(null);
+    setForm(initialForm);
+    setCoverImages([]);
+    setCarouselImages([]);
+    setImagesTouched(false);
+    setMessage("");
+  };
 
-  const genreOptions = useMemo(() => {
-    const dynamicGenres = (series || []).map((serie) => serie.genero);
+  const openCreateForm = () => {
+    setView("form");
+    setEditingEvent(null);
+    setForm(initialForm);
+    setCoverImages([]);
+    setCarouselImages([]);
+    setImagesTouched(false);
+    setMessage("");
+  };
 
-    return uniqueTextOptions([...baseGenres, ...dynamicGenres]);
-  }, [series]);
+  const openEditForm = (event) => {
+    const eventSeriesIds = Array.isArray(event.series)
+      ? event.series
+          .map((serie) => {
+            if (typeof serie === "string") return serie;
+            return getId(serie);
+          })
+          .filter(Boolean)
+      : [];
 
-  const authorOptions = useMemo(() => {
-    const dynamicAuthors = (series || []).flatMap((serie) => {
-      const creators = Array.isArray(serie.creadoresNombre)
-        ? serie.creadoresNombre
-        : [];
+    const eventProductsIds = Array.isArray(event.productos)
+      ? event.productos
+          .map((product) => {
+            if (typeof product === "string") return product;
+            return getId(product);
+          })
+          .filter(Boolean)
+      : [];
 
-      const authorText = serie.autor
-        ? serie.autor
-            .split(",")
-            .map((item) => item.trim())
-            .filter(Boolean)
-        : [];
+    const matchedSeriesIdsFromNames = Array.isArray(event.seriesNombre)
+      ? activeSeries
+          .filter((serie) =>
+            event.seriesNombre.some(
+              (name) => normalizeText(name) === normalizeText(serie.nombre)
+            )
+          )
+          .map(getId)
+      : [];
 
-      return [...creators, ...authorText];
+    const finalSeriesIds = [
+      ...new Set([...eventSeriesIds, ...matchedSeriesIdsFromNames].filter(Boolean))
+    ];
+
+    const coverImage = getImageSource(event.imagen);
+    const carouselSources = Array.isArray(event.imagenes)
+      ? event.imagenes.map(getImageSource).filter(Boolean)
+      : [];
+
+    setEditingEvent(event);
+
+    setForm({
+      titulo: event.titulo || event.nombre || "",
+      descripcion: event.descripcion || "",
+      categoria:
+        typeof event.categoria === "string" && event.categoria !== event.categoriaNombre
+          ? event.categoria
+          : "",
+      categoriaNombre: event.categoriaNombre || "Eventos",
+      origen:
+        typeof event.origen === "string" && event.origen !== event.origenNombre
+          ? event.origen
+          : "",
+      origenNombre: event.origenNombre || "Variado",
+      pais: event.pais || getCountryCodeFromOrigin(event.origenNombre || "Variado"),
+      tipoEvento: event.tipoEvento || event.tipo || "Otro",
+      fechaInicio: formatDateInput(event.fechaInicio),
+      fechaFin: formatDateInput(event.fechaFin),
+      estado: event.estado || "proximo",
+      destacado: Boolean(event.destacado),
+      activo: event.activo !== false,
+      series: finalSeriesIds,
+      seriesNombre: Array.isArray(event.seriesNombre)
+        ? event.seriesNombre.filter(Boolean)
+        : [],
+      productos: eventProductsIds
     });
 
-    return uniqueTextOptions(dynamicAuthors);
-  }, [series]);
+    setCoverImages(
+      coverImage ? [createEditableImageFromSource(coverImage, 0)].filter(Boolean) : []
+    );
 
-  const coverPreviewImages = useMemo(() => {
-    return coverImages.map(getImageSource).filter(Boolean);
-  }, [coverImages]);
+    setCarouselImages(
+      carouselSources
+        .filter((image) => image !== coverImage)
+        .map((image, index) => createEditableImageFromSource(image, index))
+        .filter(Boolean)
+    );
 
-  const carouselPreviewImages = useMemo(() => {
-    return carouselImages.map(getImageSource).filter(Boolean);
-  }, [carouselImages]);
+    setImagesTouched(false);
+    setMessage("");
+    setView("form");
+  };
 
   const setCoverImagesTouched = (updater) => {
     setImagesTouched(true);
@@ -514,76 +520,6 @@ function AdminSeriesPage() {
     );
   };
 
-  const resetForm = () => {
-    setForm(initialForm);
-    setEditingSeries(null);
-    setCoverImages([]);
-    setCarouselImages([]);
-    setImagesTouched(false);
-    setSelectedAuthors([]);
-    setAuthorDraft("");
-    setView("list");
-  };
-
-  const openCreateForm = () => {
-    setMessage("");
-    setEditingSeries(null);
-    setForm(initialForm);
-    setCoverImages([]);
-    setCarouselImages([]);
-    setImagesTouched(false);
-    setSelectedAuthors([]);
-    setAuthorDraft("");
-    setView("form");
-  };
-
-  const openEditForm = (serie) => {
-    setMessage("");
-    setEditingSeries(serie);
-
-    const coverImage = getCoverImageFromSerie(serie);
-    const additionalImages = getAdditionalImagesFromSerie(serie);
-
-    const authors = Array.isArray(serie.creadoresNombre)
-      ? serie.creadoresNombre
-      : serie.autor
-      ? serie.autor
-          .split(",")
-          .map((item) => item.trim())
-          .filter(Boolean)
-      : [];
-
-    setForm({
-      nombre: serie.nombre || "",
-      descripcion: serie.descripcion || "",
-      categoriaNombre:
-        serie.categoriaPrincipalNombre ||
-        serie.categoriaNombre ||
-        serie.categoria ||
-        "Manhwa",
-      origenNombre: serie.origenNombre || "Corea",
-      genero: serie.genero || "",
-      destacada: Boolean(serie.destacada),
-      activa: serie.activo !== false && serie.activa !== false,
-      orden: Number(serie.orden || 0)
-    });
-
-    setCoverImages(
-      coverImage ? [createEditableImageFromSource(coverImage, 0)] : []
-    );
-
-    setCarouselImages(
-      additionalImages.map((image, index) =>
-        createEditableImageFromSource(image, index + 1)
-      )
-    );
-
-    setImagesTouched(false);
-    setSelectedAuthors([...new Set(authors)]);
-    setAuthorDraft("");
-    setView("form");
-  };
-
   const handleChange = (event) => {
     const { name, value, type, checked } = event.target;
 
@@ -593,38 +529,96 @@ function AdminSeriesPage() {
     }));
   };
 
+  const handleCategoryChange = (event) => {
+    const value = event.target.value;
+
+    const selectedCategory = activeCategories.find(
+      (category) => getId(category) === value
+    );
+
+    if (selectedCategory) {
+      setForm((currentForm) => ({
+        ...currentForm,
+        categoria: getId(selectedCategory),
+        categoriaNombre: selectedCategory.nombre
+      }));
+
+      return;
+    }
+
+    setForm((currentForm) => ({
+      ...currentForm,
+      categoria: "",
+      categoriaNombre: value
+    }));
+  };
+
+  const handleOriginChange = (event) => {
+    const value = event.target.value;
+
+    const selectedOrigin = activeOrigins.find((origin) => getId(origin) === value);
+
+    if (selectedOrigin) {
+      setForm((currentForm) => ({
+        ...currentForm,
+        origen: getId(selectedOrigin),
+        origenNombre: selectedOrigin.nombre,
+        pais: getCountryCodeFromOrigin(selectedOrigin.nombre)
+      }));
+
+      return;
+    }
+
+    setForm((currentForm) => ({
+      ...currentForm,
+      origen: "",
+      origenNombre: value,
+      pais: getCountryCodeFromOrigin(value)
+    }));
+  };
+
   const buildPayload = async () => {
-    const categoryName = form.categoriaNombre.trim() || "Manhwa";
-    const originName = form.origenNombre.trim() || "Corea";
+    const selectedSeries = form.series
+      .map((seriesId) => activeSeries.find((serie) => getId(serie) === seriesId))
+      .filter(Boolean);
+
+    const selectedSeriesNames = [
+      ...new Set([
+        ...selectedSeries.map((serie) => serie.nombre).filter(Boolean),
+        ...form.seriesNombre.filter(Boolean)
+      ])
+    ];
 
     const payload = {
-      nombre: form.nombre.trim(),
+      titulo: form.titulo.trim(),
+      nombre: form.titulo.trim(),
       descripcion: form.descripcion.trim(),
 
-      categoriaPrincipalNombre: categoryName,
-      categoriaNombre: categoryName,
+      categoria: form.categoria,
+      categoriaNombre: form.categoriaNombre || "Eventos",
 
-      origenNombre: originName,
-      pais: getCountryCodeFromOrigin(originName),
+      origen: form.origen,
+      origenNombre: form.origenNombre || "Variado",
+      pais: form.pais || getCountryCodeFromOrigin(form.origenNombre || "Variado"),
 
-      tipo: categoryName,
-      genero: form.genero.trim(),
+      tipoEvento: form.tipoEvento || "Otro",
 
-      autor: selectedAuthors.join(", "),
-      creadoresNombre: selectedAuthors,
+      fechaInicio: form.fechaInicio || null,
+      fechaFin: form.fechaFin || null,
 
-      destacada: Boolean(form.destacada),
-      activa: Boolean(form.activa),
-      activo: Boolean(form.activa),
+      estado: form.estado || "proximo",
+      destacado: Boolean(form.destacado),
+      activo: Boolean(form.activo),
 
-      orden: Number(form.orden || 0)
+      series: form.series,
+      seriesNombre: selectedSeriesNames,
+
+      productos: form.productos
     };
 
-    if (!editingSeries || imagesTouched) {
+    if (!editingEvent || imagesTouched) {
       const preparedCoverImages = await prepareImagesForPayload(coverImages);
-      const preparedCarouselImages = await prepareImagesForPayload(
-        carouselImages
-      );
+      const preparedCarouselImages = await prepareImagesForPayload(carouselImages);
 
       payload.imagen = preparedCoverImages[0] || "";
       payload.imagenes = preparedCarouselImages;
@@ -637,80 +631,70 @@ function AdminSeriesPage() {
   const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (!form.nombre.trim()) {
-      setMessage("Escribe el nombre de la serie o historia.");
+    if (!form.titulo.trim()) {
+      setMessage("Escribe el título del evento.");
+      return;
+    }
+
+    if (!form.descripcion.trim()) {
+      setMessage("Escribe una descripción para el evento.");
       return;
     }
 
     if (!form.categoriaNombre.trim()) {
-      setMessage("Selecciona o crea una categoría.");
-      return;
-    }
-
-    if (!form.origenNombre.trim()) {
-      setMessage("Selecciona o crea un país/origen.");
-      return;
-    }
-
-    if (!form.genero.trim()) {
-      setMessage("Selecciona o crea un género.");
-      return;
-    }
-
-    if (!editingSeries && coverImages.length === 0) {
-      setMessage("Sube una imagen principal para la portada.");
+      setMessage("Selecciona o escribe una categoría del evento.");
       return;
     }
 
     setSaving(true);
     setMessage(
-      editingSeries
-        ? "Guardando cambios de la serie..."
-        : "Creando serie..."
+      editingEvent
+        ? "Guardando cambios del evento..."
+        : "Creando evento..."
     );
 
     try {
       const payload = await buildPayload();
 
-      if (editingSeries) {
-        await updateSeriesFull(getId(editingSeries), payload);
-        setMessage("Serie actualizada correctamente.");
+      if (editingEvent) {
+        await updateEventFull(getId(editingEvent), payload);
+        setMessage("Evento actualizado correctamente.");
       } else {
-        await createSeriesFull(payload);
-        setMessage("Serie creada correctamente.");
+        await createEventFull(payload);
+        setMessage("Evento creado correctamente.");
       }
 
       resetForm();
-      await refreshSeries?.();
+      await refreshEvents?.();
     } catch (error) {
-      setMessage(error.message || "No se pudo guardar la serie.");
+      setMessage(error.message || "No se pudo guardar el evento.");
     } finally {
       setSaving(false);
     }
   };
 
-  const handleToggleStatus = async (serie) => {
-    const seriesId = getId(serie);
+  const handleToggleStatus = async (event) => {
+    const eventId = getId(event);
 
-    if (!seriesId) {
-      setMessage("No se encontró el ID de la serie.");
+    if (!eventId) {
+      setMessage("No se encontró el ID del evento.");
       return;
     }
 
     setSaving(true);
-    setMessage(serie.activo ? "Desactivando serie..." : "Activando serie...");
+    setMessage(event.activo ? "Desactivando evento..." : "Activando evento...");
 
     try {
-      await toggleSeriesStatus(seriesId);
-      await refreshSeries?.();
+      await toggleEventStatus(eventId);
+      await refreshEvents?.();
 
       setMessage(
-        serie.activo
-          ? "Serie desactivada correctamente."
-          : "Serie activada correctamente."
+        event.activo
+          ? "Evento desactivado correctamente."
+          : "Evento activado correctamente."
       );
     } catch (error) {
-      setMessage(error.message || "No se pudo cambiar el estado de la serie.");
+      setMessage(error.message || "No se pudo cambiar el estado del evento.");
     } finally {
       setSaving(false);
     }
@@ -719,17 +703,16 @@ function AdminSeriesPage() {
   return (
     <section className="space-y-6">
       <div className="rounded-[32px] bg-white p-8 smika-shadow border border-[#87CCC8]/20">
-        <p className="text-[#87CCC8] font-black">Series / Historias</p>
+        <p className="text-[#87CCC8] font-black">Eventos</p>
 
         <div className="mt-2 flex flex-wrap items-end justify-between gap-4">
           <div>
-            <h2 className="text-4xl font-black">
-              Gestión de series e historias
-            </h2>
+            <h2 className="text-4xl font-black">Gestión de eventos</h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Crea series con categoría, país/origen, género, varios autores y
-              carga real de imágenes. La portada no se mezcla con el carrusel.
+              Crea y edita eventos reales de Smika Store. Aquí se configuran
+              portada, carrusel, fechas, estado, series vinculadas y productos
+              asociados al evento.
             </p>
           </div>
 
@@ -737,13 +720,13 @@ function AdminSeriesPage() {
             {view === "list" && (
               <button
                 type="button"
-                onClick={refreshSeries}
-                disabled={loadingSeries || saving}
+                onClick={refreshEvents}
+                disabled={loadingEvents || saving}
                 className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
               >
                 <RefreshCw
                   size={18}
-                  className={loadingSeries ? "animate-spin" : ""}
+                  className={loadingEvents ? "animate-spin" : ""}
                 />
                 Recargar
               </button>
@@ -756,7 +739,7 @@ function AdminSeriesPage() {
                 className="smika-button-primary flex items-center justify-center gap-2"
               >
                 <Plus size={18} />
-                Crear serie
+                Crear evento
               </button>
             ) : (
               <button
@@ -772,15 +755,9 @@ function AdminSeriesPage() {
         </div>
       </div>
 
-      {message && (
+      {(message || eventsLoadError) && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
-          {message}
-        </div>
-      )}
-
-      {seriesLoadError && (
-        <div className="rounded-[24px] bg-red-50 px-5 py-4 text-sm font-black text-red-600">
-          {seriesLoadError}
+          {message || eventsLoadError}
         </div>
       )}
 
@@ -792,13 +769,11 @@ function AdminSeriesPage() {
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
               <p className="text-[#87CCC8] font-black">
-                {editingSeries ? "Editar serie" : "Nueva serie"}
+                {editingEvent ? "Editar evento" : "Nuevo evento"}
               </p>
 
               <h3 className="mt-2 text-2xl font-black">
-                {editingSeries
-                  ? "Actualizar datos de la serie"
-                  : "Registrar nueva serie"}
+                {editingEvent ? "Actualizar evento" : "Registrar evento"}
               </h3>
             </div>
 
@@ -818,129 +793,206 @@ function AdminSeriesPage() {
 
           <div className="mt-6 grid gap-5 lg:grid-cols-2">
             <label className="grid gap-2 text-sm font-black">
-              Nombre de la serie / historia
+              Título del evento
               <input
-                name="nombre"
-                value={form.nombre}
+                name="titulo"
+                value={form.titulo}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Ejemplo: La Ventura del Caballero Blanco"
+                placeholder="Ejemplo: CAFE LEBOM - BLOSSOMS OF THE WHITE NIGHT"
               />
             </label>
 
-            <CreatableDropdown
-              label="Categoría"
-              value={form.categoriaNombre}
-              onChange={(value) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  categoriaNombre: value
-                }))
-              }
-              options={categoryOptions}
-              placeholder="Busca o escribe una categoría"
-              createLabel={(name) => `Agregar “${name}” a Categoría`}
-              helperText="Ejemplo: Manga, Manhwa, Manhua, Novela o Webtoon."
-            />
-
-            <CreatableDropdown
-              label="País / origen"
-              value={form.origenNombre}
-              onChange={(value) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  origenNombre: value
-                }))
-              }
-              options={countryOptions}
-              placeholder="Busca o escribe un país/origen"
-              createLabel={(name) => `Agregar “${name}” a País`}
-              helperText="Si no es China, Corea, Japón o Variado, escribe otro país/origen y agrégalo."
-            />
-
-            <CreatableDropdown
-              label="Género"
-              value={form.genero}
-              onChange={(value) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  genero: value
-                }))
-              }
-              options={genreOptions}
-              placeholder="Busca o escribe un género"
-              createLabel={(name) => `Agregar “${name}” a Género`}
-              helperText="Ejemplo: BL, romance, fantasía, drama o isekai."
-            />
-
             <label className="grid gap-2 text-sm font-black">
-              Orden
+              Tipo de evento
               <input
-                name="orden"
-                type="number"
-                value={form.orden}
+                name="tipoEvento"
+                list="event-type-options"
+                value={form.tipoEvento}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="0"
+                placeholder="Café evento, feria, pop up..."
               />
+
+              <datalist id="event-type-options">
+                {eventTypeOptions.map((option) => (
+                  <option key={option} value={option} />
+                ))}
+              </datalist>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Categoría
+              <select
+                value={form.categoria || form.categoriaNombre}
+                onChange={handleCategoryChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              >
+                {categoryOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+
+                {activeCategories.map((category) => (
+                  <option key={getId(category)} value={getId(category)}>
+                    {category.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Origen / País
+              <select
+                value={form.origen || form.origenNombre}
+                onChange={handleOriginChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              >
+                {originOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+
+                {activeOrigins.map((origin) => (
+                  <option key={getId(origin)} value={getId(origin)}>
+                    {origin.nombre}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Fecha inicio
+              <input
+                type="date"
+                name="fechaInicio"
+                value={form.fechaInicio}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Fecha fin
+              <input
+                type="date"
+                name="fechaFin"
+                value={form.fechaFin}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              />
+            </label>
+
+            <label className="grid gap-2 text-sm font-black">
+              Estado
+              <select
+                name="estado"
+                value={form.estado}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              >
+                {eventStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
             </label>
 
             <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4">
               <label className="flex items-center justify-between gap-4 text-sm font-black">
-                Destacada
+                Evento destacado
                 <input
                   type="checkbox"
-                  name="destacada"
-                  checked={form.destacada}
+                  name="destacado"
+                  checked={form.destacado}
                   onChange={handleChange}
                   className="h-5 w-5"
                 />
               </label>
 
               <label className="flex items-center justify-between gap-4 text-sm font-black">
-                Activa
+                Evento activo
                 <input
                   type="checkbox"
-                  name="activa"
-                  checked={form.activa}
+                  name="activo"
+                  checked={form.activo}
                   onChange={handleChange}
                   className="h-5 w-5"
                 />
               </label>
             </div>
 
-            <AuthorSelector
-              authorDraft={authorDraft}
-              setAuthorDraft={setAuthorDraft}
-              selectedAuthors={selectedAuthors}
-              setSelectedAuthors={setSelectedAuthors}
-              authorOptions={authorOptions}
-            />
-
             <label className="grid gap-2 text-sm font-black lg:col-span-2">
-              Descripción
+              Descripción del evento
               <textarea
                 name="descripcion"
                 value={form.descripcion}
                 onChange={handleChange}
                 rows="4"
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Describe brevemente la serie o historia..."
+                placeholder="Describe el evento, condiciones, productos vinculados o detalle para la página pública."
               />
             </label>
 
+            <div className="lg:col-span-2">
+              <EventMultiSelect
+                title="Series / Historias vinculadas"
+                description="Selecciona las series o historias relacionadas a este evento."
+                options={activeSeries}
+                selectedIds={form.series}
+                onChange={(updater) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    series:
+                      typeof updater === "function"
+                        ? updater(currentForm.series)
+                        : updater
+                  }))
+                }
+                getLabel={(serie) => serie.nombre || "Serie sin nombre"}
+                emptyText="Todavía no hay series registradas."
+              />
+            </div>
+
+            <div className="lg:col-span-2">
+              <EventMultiSelect
+                title="Productos vinculados al evento"
+                description="Selecciona productos existentes para mostrarlos dentro del detalle del evento."
+                options={activeProducts}
+                selectedIds={form.productos}
+                onChange={(updater) =>
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    productos:
+                      typeof updater === "function"
+                        ? updater(currentForm.productos)
+                        : updater
+                  }))
+                }
+                getLabel={(product) =>
+                  `${product.nombre || "Producto"}${
+                    product.serie ? ` · ${product.serie}` : ""
+                  }`
+                }
+                emptyText="Todavía no hay productos registrados."
+              />
+            </div>
+
             <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
-              <p className="font-black">Portada principal</p>
+              <p className="font-black">Portada del evento</p>
 
               <p className="mt-1 text-sm text-gray-600 leading-6">
-                Esta imagen se usará como portada principal. No se mezclará con
-                el carrusel.
+                Esta será la imagen principal del evento. Si editas otros datos
+                y no tocas esta zona, la portada se conserva.
               </p>
 
               <div className="mt-4">
                 <ImageDropzone
                   label="Subir portada"
-                  description="Arrastra o selecciona una imagen. Se comprimirá y podrás ajustar el recorte."
+                  description="Sube una imagen principal para el evento."
                   images={coverImages}
                   setImages={setCoverImagesTouched}
                   multiple={false}
@@ -949,64 +1001,21 @@ function AdminSeriesPage() {
             </div>
 
             <div className="lg:col-span-2 rounded-[28px] bg-[#F8F6F7] p-5">
-              <p className="font-black">Imágenes adicionales del carrusel</p>
+              <p className="font-black">Carrusel del evento</p>
 
               <p className="mt-1 text-sm text-gray-600 leading-6">
-                Estas imágenes son solo para el carrusel. Si no subes imágenes
-                adicionales, no aparecerá carrusel.
+                Imágenes adicionales del evento. Se mostrarán en la página de
+                detalle con flechas.
               </p>
 
               <div className="mt-4">
                 <ImageDropzone
-                  label="Subir imágenes adicionales"
-                  description="Puedes subir varias imágenes. Cada una se comprimirá y podrá recortarse."
+                  label="Subir imágenes del carrusel"
+                  description="Sube una o varias imágenes adicionales."
                   images={carouselImages}
                   setImages={setCarouselImagesTouched}
                   multiple
                 />
-              </div>
-            </div>
-
-            <div className="lg:col-span-2 grid gap-5 lg:grid-cols-2">
-              <div className="rounded-[28px] bg-[#F8F6F7] p-5">
-                <p className="font-black">Vista previa de portada</p>
-
-                <p className="mt-1 text-sm text-gray-600">
-                  Esta vista muestra únicamente la portada.
-                </p>
-
-                <div className="mt-4 h-72 overflow-hidden rounded-[28px] bg-white">
-                  {coverPreviewImages.length > 0 ? (
-                    <img
-                      src={coverPreviewImages[0]}
-                      alt={`${form.nombre || "Serie Smika"} portada`}
-                      className="h-full w-full object-contain"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center text-gray-400">
-                      <ImageIcon size={38} />
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="rounded-[28px] bg-[#F8F6F7] p-5">
-                <p className="font-black">Vista previa del carrusel</p>
-
-                <p className="mt-1 text-sm text-gray-600">
-                  Aquí solo van las imágenes adicionales. Si no hay adicionales,
-                  no se mostrará carrusel.
-                </p>
-
-                <div className="mt-4">
-                  <AutoCarousel
-                    images={carouselPreviewImages}
-                    alt={`${form.nombre || "Serie Smika"} carrusel`}
-                    heightClassName="h-72"
-                    fit="contain"
-                    showEmpty
-                  />
-                </div>
               </div>
             </div>
           </div>
@@ -1015,49 +1024,53 @@ function AdminSeriesPage() {
 
       {view === "list" && (
         <>
-          {loadingSeries ? (
+          {loadingEvents ? (
             <div className="rounded-[32px] bg-white p-8 text-center smika-shadow">
               <Loader2
                 size={42}
                 className="mx-auto animate-spin text-[#87CCC8]"
               />
-
-              <p className="mt-4 font-black">Cargando series...</p>
+              <p className="mt-4 font-black">Cargando eventos...</p>
             </div>
-          ) : sortedSeries.length === 0 ? (
+          ) : sortedEvents.length === 0 ? (
             <div className="rounded-[32px] bg-white p-8 text-center smika-shadow">
-              <UsersRound size={42} className="mx-auto text-[#D1B0C7]" />
+              <CalendarDays size={42} className="mx-auto text-[#D1B0C7]" />
 
               <h3 className="mt-4 text-2xl font-black">
-                Todavía no hay series registradas
+                Todavía no hay eventos
               </h3>
 
               <p className="mt-2 text-gray-600">
-                Crea una serie para usarla luego en productos.
+                Crea un evento para mostrarlo en la programación.
               </p>
             </div>
           ) : (
             <div className="grid gap-6 xl:grid-cols-3">
-              {sortedSeries.map((serie) => {
-                const coverImage = getCoverImageFromSerie(serie);
-                const additionalImages = getAdditionalImagesFromSerie(serie);
+              {sortedEvents.map((event) => {
+                const eventId = getId(event);
+                const eventImages = [
+                  getImageSource(event.imagen),
+                  ...(Array.isArray(event.imagenes)
+                    ? event.imagenes.map(getImageSource)
+                    : [])
+                ].filter(Boolean);
 
                 return (
                   <article
-                    key={getId(serie)}
+                    key={eventId}
                     className="rounded-[28px] bg-white border border-[#87CCC8]/20 smika-shadow overflow-hidden"
                   >
-                    <div className="h-44 bg-[#F8F6F7]">
-                      {coverImage ? (
-                        <img
-                          src={coverImage}
-                          alt={serie.nombre}
-                          className="h-full w-full object-contain"
-                          loading="lazy"
+                    <div className="bg-[#F8F6F7]">
+                      {eventImages.length > 0 ? (
+                        <AutoCarousel
+                          images={eventImages}
+                          alt={event.titulo || event.nombre}
+                          heightClassName="h-48"
+                          fit="contain"
                         />
                       ) : (
-                        <div className="h-full flex items-center justify-center text-gray-400">
-                          <ImageIcon size={36} />
+                        <div className="flex h-48 items-center justify-center text-gray-400">
+                          <ImageIcon size={38} />
                         </div>
                       )}
                     </div>
@@ -1065,61 +1078,70 @@ function AdminSeriesPage() {
                     <div className="p-6">
                       <div className="flex flex-wrap gap-2">
                         <span className="rounded-full bg-[#F7D9D8] px-3 py-1 text-xs font-black">
-                          {getSeriesStatus(serie)}
+                          {event.activo ? "Activo" : "Inactivo"}
                         </span>
 
-                        {serie.origenNombre && (
-                          <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
-                            {serie.origenNombre}
+                        <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1 text-xs font-black">
+                          {getStatusLabel(event.estado)}
+                        </span>
+
+                        {event.destacado && (
+                          <span className="rounded-full bg-[#D1B0C7]/30 px-3 py-1 text-xs font-black">
+                            Destacado
                           </span>
                         )}
                       </div>
 
                       <h3 className="mt-4 text-xl font-black">
-                        {serie.nombre}
+                        {event.titulo || event.nombre}
                       </h3>
 
                       <div className="mt-3 grid gap-2 text-sm text-gray-600">
                         <p>
                           <strong>Categoría:</strong>{" "}
-                          {serie.categoriaNombre ||
-                            serie.categoriaPrincipalNombre ||
-                            "Sin categoría"}
+                          {event.categoriaNombre || "Eventos"}
                         </p>
 
                         <p>
-                          <strong>País/origen:</strong>{" "}
-                          {serie.origenNombre || "Sin país/origen"}
-                        </p>
-
-                        {serie.genero && (
-                          <p>
-                            <strong>Género:</strong> {serie.genero}
-                          </p>
-                        )}
-
-                        <p>
-                          <strong>Autores:</strong>{" "}
-                          {Array.isArray(serie.creadoresNombre) &&
-                          serie.creadoresNombre.length > 0
-                            ? serie.creadoresNombre.join(", ")
-                            : serie.autor || "No especificado"}
+                          <strong>Origen:</strong>{" "}
+                          {event.origenNombre || "Variado"}
                         </p>
 
                         <p>
-                          <strong>Portada:</strong> {coverImage ? "Sí" : "No"}
+                          <strong>Tipo:</strong>{" "}
+                          {event.tipoEvento || "Otro"}
                         </p>
 
                         <p>
-                          <strong>Imágenes carrusel:</strong>{" "}
-                          {additionalImages.length}
+                          <strong>Inicio:</strong>{" "}
+                          {formatDateText(event.fechaInicio)}
+                        </p>
+
+                        <p>
+                          <strong>Fin:</strong>{" "}
+                          {formatDateText(event.fechaFin)}
+                        </p>
+
+                        <p>
+                          <strong>Series:</strong>{" "}
+                          {Array.isArray(event.seriesNombre) &&
+                          event.seriesNombre.length > 0
+                            ? event.seriesNombre.join(", ")
+                            : event.serieNombre || "Sin series"}
+                        </p>
+
+                        <p>
+                          <strong>Productos vinculados:</strong>{" "}
+                          {Array.isArray(event.productos)
+                            ? event.productos.length
+                            : 0}
                         </p>
                       </div>
 
                       <div className="mt-5 flex gap-2">
                         <button
                           type="button"
-                          onClick={() => openEditForm(serie)}
+                          onClick={() => openEditForm(event)}
                           className="smika-button-primary flex-1 flex items-center justify-center gap-2"
                         >
                           <Pencil size={16} />
@@ -1128,15 +1150,15 @@ function AdminSeriesPage() {
 
                         <button
                           type="button"
-                          onClick={() => handleToggleStatus(serie)}
+                          onClick={() => handleToggleStatus(event)}
                           disabled={saving}
                           className="h-11 w-11 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-60"
-                          title={serie.activo ? "Desactivar" : "Activar"}
+                          title={event.activo ? "Desactivar" : "Activar"}
                         >
                           <Power
                             size={17}
                             className={
-                              serie.activo ? "text-gray-500" : "text-red-500"
+                              event.activo ? "text-gray-500" : "text-red-500"
                             }
                           />
                         </button>
@@ -1153,4 +1175,4 @@ function AdminSeriesPage() {
   );
 }
 
-export default AdminSeriesPage;
+export default AdminEventsPage;
