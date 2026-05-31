@@ -74,6 +74,59 @@ function buildStoredProduct(product) {
   };
 }
 
+
+function parseInlineMarkdown(text = "") {
+  const parts = text.split(/(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*)/g);
+
+  return parts.map((part, index) => {
+    if (!part) return null;
+
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return (
+        <strong key={`${part}-${index}`} className="font-black text-[#2F2F2F]">
+          {part.slice(2, -2)}
+        </strong>
+      );
+    }
+
+    if (part.startsWith("__") && part.endsWith("__")) {
+      return (
+        <span key={`${part}-${index}`} className="underline decoration-2 underline-offset-4">
+          {part.slice(2, -2)}
+        </span>
+      );
+    }
+
+    if (part.startsWith("*") && part.endsWith("*")) {
+      return (
+        <em key={`${part}-${index}`} className="italic">
+          {part.slice(1, -1)}
+        </em>
+      );
+    }
+
+    return part;
+  });
+}
+
+function FormattedProductDescription({ description }) {
+  const fallbackDescription =
+    "Producto registrado en Smika Store. Aquí se muestra la información disponible del producto, incluyendo serie, tipo, disponibilidad, precio referencial e imágenes.";
+
+  const text = description?.trim() || fallbackDescription;
+  const lines = text.split(/\r?\n/);
+
+  return (
+    <div className="mt-6 space-y-3 text-gray-600 leading-8">
+      {lines.map((line, index) => (
+        <p key={`${line}-${index}`} className={line.trim() ? "" : "h-4"}>
+          {line.trim() ? parseInlineMarkdown(line) : <span>&nbsp;</span>}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 function ProductDetailPage() {
   const { slug } = useParams();
   const navigate = useNavigate();
@@ -360,10 +413,7 @@ function ProductDetailPage() {
             )}
           </div>
 
-          <p className="mt-6 text-gray-600 leading-8">
-            {product.descripcion ||
-              "Producto registrado en Smika Store. Aquí se muestra la información disponible del producto, incluyendo serie, tipo, disponibilidad, precio referencial e imágenes."}
-          </p>
+          <FormattedProductDescription description={product.descripcion} />
 
           <div className="mt-8 grid gap-4 sm:grid-cols-2">
             <div className="rounded-3xl bg-[#F8F6F7] p-5">
