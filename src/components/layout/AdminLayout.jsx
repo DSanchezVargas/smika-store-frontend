@@ -47,6 +47,12 @@ const adminNavigation = [
     priorityGroup: "principal"
   },
   {
+    label: "Tipos de producto",
+    path: "/admin/tipos-producto",
+    icon: Tags,
+    priorityGroup: "principal"
+  },
+  {
     label: "Categorías",
     path: "/admin/categorias",
     icon: FolderTree,

@@ -13,10 +13,12 @@ import UserProfilePage from "./pages/public/UserProfilePage";
 import UserSettingsPage from "./pages/public/UserSettingsPage";
 import EventSchedulePage from "./pages/public/EventSchedulePage";
 import EventDetailPage from "./pages/public/EventDetailPage";
+import SeriesDetailPage from "./pages/public/SeriesDetailPage";
 
 import AdminLayout from "./components/layout/AdminLayout";
 import AdminDashboardPage from "./pages/admin/AdminDashboardPage";
 import AdminProductsPage from "./pages/admin/AdminProductsPage";
+import AdminProductTypesPage from "./pages/admin/AdminProductTypesPage";
 import AdminOrdersPage from "./pages/admin/AdminOrdersPage";
 import AdminEventsPage from "./pages/admin/AdminEventsPage";
 import AdminSeriesPage from "./pages/admin/AdminSeriesPage";
@@ -40,6 +42,7 @@ function App() {
         />
 
         <Route path="/series" element={<CatalogPage title="Series" />} />
+        <Route path="/series/detalle/:slug" element={<SeriesDetailPage />} />
         <Route
           path="/series/:subcategory"
           element={<CatalogPage title="Series" />}
@@ -91,6 +94,7 @@ function App() {
         <Route path="/admin" element={<AdminLayout />}>
           <Route index element={<AdminDashboardPage />} />
           <Route path="productos" element={<AdminProductsPage />} />
+          <Route path="tipos-producto" element={<AdminProductTypesPage />} />
           <Route path="pedidos" element={<AdminOrdersPage />} />
           <Route path="eventos" element={<AdminEventsPage />} />
           <Route path="series" element={<AdminSeriesPage />} />

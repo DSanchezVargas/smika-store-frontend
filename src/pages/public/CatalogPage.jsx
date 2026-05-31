@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
-import { BookOpen, SlidersHorizontal } from "lucide-react";
+import { Link, useParams } from "react-router-dom";
+import { BookOpen, ChevronRight, Image as ImageIcon, SlidersHorizontal } from "lucide-react";
 
-import AutoCarousel from "../../components/common/AutoCarousel";
 import ProductCard from "../../components/product/ProductCard";
 import { useAdminData } from "../../context/AdminDataContext";
 import { getPublicProducts } from "../../utils/publicProducts";
@@ -35,6 +34,25 @@ function normalizeText(text = "") {
     .trim();
 }
 
+function getImageSource(image) {
+  if (!image) return "";
+
+  if (typeof image === "string") return image;
+
+  if (typeof image === "object") {
+    return (
+      image.finalPreview ||
+      image.url ||
+      image.preview ||
+      image.src ||
+      image.imagen ||
+      ""
+    );
+  }
+
+  return "";
+}
+
 function matchesRoute(value = "", route = "") {
   if (!route) return true;
 
@@ -45,15 +63,35 @@ function matchesRoute(value = "", route = "") {
 }
 
 function getSeriesImages(serie) {
-  const images = Array.isArray(serie?.imagenes)
-    ? serie.imagenes.filter(Boolean)
-    : [];
+  const images = [];
 
-  if (serie?.imagen && !images.includes(serie.imagen)) {
-    images.unshift(serie.imagen);
+  const coverImage = getImageSource(serie?.imagen);
+
+  if (coverImage) {
+    images.push(coverImage);
+  }
+
+  if (Array.isArray(serie?.imagenes)) {
+    serie.imagenes.forEach((image) => {
+      const imageSource = getImageSource(image);
+
+      if (imageSource && !images.includes(imageSource)) {
+        images.push(imageSource);
+      }
+    });
   }
 
   return images;
+}
+
+function getSeriesCoverImage(serie) {
+  const images = getSeriesImages(serie);
+
+  return images[0] || "";
+}
+
+function getSeriesSlug(serie) {
+  return serie?.slug || createSlug(serie?.nombre || serie?.titulo || serie?.id || serie?._id || "");
 }
 
 function getProductCountryCode(product, seriesByName) {
@@ -66,7 +104,10 @@ function getProductCountryCode(product, seriesByName) {
 
   if (directCountry) return directCountry;
 
-  const serieKey = normalizeText(product.serie || product.series || "");
+  const serieKey = normalizeText(
+    product.serieNombre || product.serie || product.series || ""
+  );
+
   const foundSerie = seriesByName.get(serieKey);
 
   return foundSerie?.pais || foundSerie?.countryCode || "";
@@ -74,7 +115,9 @@ function getProductCountryCode(product, seriesByName) {
 
 function isProductFromCurrentSection(product, title, subcategory) {
   const section = normalizeText(title);
-  const tipo = normalizeText(product.tipo || product.type || "");
+  const tipo = normalizeText(
+    `${product.tipo || ""} ${product.tipoProducto || ""} ${product.type || ""}`
+  );
   const estado = normalizeText(product.estado || product.status || "");
   const evento = product.evento || product.event || product.eventoNombre || "";
 
@@ -120,6 +163,28 @@ function getSeriesAuthor(serie) {
     serie.creadoresNombre?.join(", ") ||
     ""
   );
+}
+
+function getProductTypeText(product) {
+  const tipos = [];
+
+  if (Array.isArray(product?.tiposProducto)) {
+    tipos.push(...product.tiposProducto);
+  }
+
+  if (product?.tipoProducto) {
+    tipos.push(product.tipoProducto);
+  }
+
+  if (product?.tipo) {
+    tipos.push(product.tipo);
+  }
+
+  if (product?.type) {
+    tipos.push(product.type);
+  }
+
+  return tipos.join(" ");
 }
 
 function CatalogPage({ title = "Catálogo" }) {
@@ -177,7 +242,7 @@ function CatalogPage({ title = "Catálogo" }) {
   const availableStories = useMemo(() => {
     const storiesFromAdmin = (series || [])
       .filter((serie) => {
-        if (!serie.activo) return false;
+        if (serie.activo === false || serie.activa === false) return false;
         if (!currentCountry) return true;
 
         return getSeriesCountryCode(serie) === currentCountry;
@@ -195,7 +260,7 @@ function CatalogPage({ title = "Catálogo" }) {
     if (!isSeriesPage) return [];
 
     return (series || [])
-      .filter((serie) => serie.activo !== false)
+      .filter((serie) => serie.activo !== false && serie.activa !== false)
       .filter((serie) => {
         if (currentCountry && getSeriesCountryCode(serie) !== currentCountry) {
           return false;
@@ -291,7 +356,7 @@ function CatalogPage({ title = "Catálogo" }) {
         const search = normalizeText(typeSearch);
 
         const searchableText = normalizeText(
-          `${product.tipo} ${product.type} ${product.nombre} ${product.name}`
+          `${getProductTypeText(product)} ${product.nombre} ${product.name}`
         );
 
         if (!searchableText.includes(search)) return false;
@@ -304,8 +369,9 @@ function CatalogPage({ title = "Catálogo" }) {
 
         if (
           selectedStory &&
-          normalizeText(product.serie || product.series || product.serieNombre) !==
-            normalizeText(selectedStory)
+          normalizeText(
+            product.serie || product.series || product.serieNombre
+          ) !== normalizeText(selectedStory)
         ) {
           return false;
         }
@@ -361,8 +427,9 @@ function CatalogPage({ title = "Catálogo" }) {
 
         {isSeriesPage && (
           <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-            Explora historias y series por origen. Cada serie puede mostrar
-            varias imágenes en carrusel automático.
+            Explora historias y series por origen. En esta vista verás la
+            portada principal; al entrar al detalle podrás ver la portada junto
+            con el carrusel completo.
           </p>
         )}
       </div>
@@ -516,32 +583,43 @@ function CatalogPage({ title = "Catálogo" }) {
               {visibleSeries.length > 0 ? (
                 <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
                   {visibleSeries.map((serie) => {
+                    const coverImage = getSeriesCoverImage(serie);
                     const images = getSeriesImages(serie);
+                    const serieSlug = getSeriesSlug(serie);
 
                     return (
-                      <article
+                      <Link
                         key={serie._id || serie.id || serie.nombre}
-                        className="smika-card smika-shadow overflow-hidden"
+                        to={`/series/detalle/${serieSlug}`}
+                        className="smika-card smika-shadow group overflow-hidden transition hover:-translate-y-1 hover:shadow-xl"
                       >
-                        <AutoCarousel
-                          images={images}
-                          alt={serie.nombre}
-                          heightClassName="h-56"
-                          className="rounded-none"
-                        />
+                        <div className="relative h-56 bg-[#F8F6F7]">
+                          {coverImage ? (
+                            <img
+                              src={coverImage}
+                              alt={serie.nombre}
+                              className="h-full w-full object-contain transition duration-300 group-hover:scale-[1.03]"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="flex h-full items-center justify-center text-gray-400">
+                              <ImageIcon size={42} />
+                            </div>
+                          )}
 
-                        <div className="p-5">
-                          <div className="flex flex-wrap gap-2 text-xs font-black">
+                          <div className="absolute left-3 top-3 flex flex-wrap gap-2 text-xs font-black">
                             <span className="rounded-full bg-[#F7D9D8] px-3 py-1">
                               {serie.pais || "V"}
                             </span>
 
-                            <span className="rounded-full bg-[#87CCC8]/20 px-3 py-1">
+                            <span className="rounded-full bg-white/90 px-3 py-1">
                               {serie.genero || "Historia"}
                             </span>
                           </div>
+                        </div>
 
-                          <h4 className="mt-4 text-xl font-black">
+                        <div className="p-5">
+                          <h4 className="text-xl font-black">
                             {serie.nombre}
                           </h4>
 
@@ -565,8 +643,13 @@ function CatalogPage({ title = "Catálogo" }) {
                               <strong>Imágenes:</strong> {images.length}
                             </p>
                           </div>
+
+                          <span className="mt-5 inline-flex items-center gap-2 font-black text-[#87CCC8]">
+                            Ver detalle
+                            <ChevronRight size={18} />
+                          </span>
                         </div>
-                      </article>
+                      </Link>
                     );
                   })}
                 </div>

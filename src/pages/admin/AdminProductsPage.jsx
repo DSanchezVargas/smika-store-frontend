@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   Image as ImageIcon,
@@ -16,6 +16,10 @@ import CreatableSelect from "../../components/admin/CreatableSelect";
 import MultiCreatableSelect from "../../components/admin/MultiCreatableSelect";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 import { useAdminData } from "../../context/AdminDataContext";
+import {
+  createProductType as apiCreateProductType,
+  getProductTypes as apiGetProductTypes
+} from "../../services/productTypeService";
 
 const initialForm = {
   nombre: "",
@@ -52,10 +56,30 @@ const baseProductTypes = [
 ];
 
 const disponibilidadOptions = [
-  { id: "stock", nombre: "En stock", value: "stock", estado: "Activo" },
-  { id: "preventa", nombre: "Preventa", value: "preventa", estado: "Preventa" },
-  { id: "por_pedido", nombre: "Por pedido", value: "por_pedido", estado: "Por pedido" },
-  { id: "agotado", nombre: "Agotado", value: "agotado", estado: "Agotado" }
+  {
+    id: "stock",
+    nombre: "En stock",
+    value: "stock",
+    estado: "Activo"
+  },
+  {
+    id: "preventa",
+    nombre: "Preventa",
+    value: "preventa",
+    estado: "Preventa"
+  },
+  {
+    id: "por_pedido",
+    nombre: "Por pedido",
+    value: "por_pedido",
+    estado: "Por pedido"
+  },
+  {
+    id: "agotado",
+    nombre: "Agotado",
+    value: "agotado",
+    estado: "Agotado"
+  }
 ];
 
 function normalizeText(text = "") {
@@ -68,7 +92,15 @@ function normalizeText(text = "") {
 }
 
 function getId(item) {
-  return item?._id || item?.id || "";
+  if (!item) return "";
+  if (typeof item === "string") return item;
+  return item._id || item.id || "";
+}
+
+function getName(item, fallback = "") {
+  if (!item) return fallback;
+  if (typeof item === "string") return item;
+  return item.nombre || item.titulo || item.name || fallback;
 }
 
 function getProductId(product) {
@@ -93,26 +125,51 @@ function getRelatedName(value, ...fallbacks) {
   return found ? found.toString().trim() : "";
 }
 
-function normalizeTiposFromProduct(product) {
-  const rawValue =
-    product?.tiposProducto ||
-    product?.tipoProducto ||
-    product?.tipo ||
-    product?.type ||
-    "";
+function uniqueText(values = []) {
+  return values.reduce((accumulator, value) => {
+    const cleanValue = value?.toString().trim();
 
-  if (Array.isArray(rawValue)) {
-    return rawValue
-      .map((item) => getRelatedName(item))
+    if (!cleanValue) return accumulator;
+
+    const exists = accumulator.some(
+      (item) => normalizeText(item) === normalizeText(cleanValue)
+    );
+
+    if (!exists) accumulator.push(cleanValue);
+
+    return accumulator;
+  }, []);
+}
+
+function normalizeArrayText(value) {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => normalizeArrayText(item))
       .map((item) => item.trim())
       .filter(Boolean);
   }
 
-  return rawValue
+  if (value && typeof value === "object") {
+    return [getName(value)].filter(Boolean);
+  }
+
+  if (!value) return [];
+
+  return value
     .toString()
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function normalizeTiposFromProduct(product) {
+  return uniqueText([
+    ...normalizeArrayText(product?.tiposProducto),
+    ...normalizeArrayText(product?.tipoProducto),
+    ...normalizeArrayText(product?.tipo),
+    ...normalizeArrayText(product?.type),
+    ...normalizeArrayText(product?.typeProduct)
+  ]);
 }
 
 function getProductType(product) {
@@ -345,6 +402,30 @@ function normalizePersonajesFromProduct(product) {
     .filter(Boolean);
 }
 
+function pickProductTypes(data) {
+  if (Array.isArray(data?.productTypes)) return data.productTypes;
+  if (Array.isArray(data?.tiposProducto)) return data.tiposProducto;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data)) return data;
+
+  return [];
+}
+
+function normalizeProductTypeFromApi(productType = {}) {
+  const id = getId(productType);
+
+  return {
+    ...productType,
+    id,
+    _id: id,
+    nombre: productType.nombre || productType.name || "",
+    descripcion: productType.descripcion || "",
+    orden: Number(productType.orden || 0),
+    activo: productType.activo !== false
+  };
+}
+
 function AdminProductsPage() {
   const {
     products,
@@ -380,6 +461,10 @@ function AdminProductsPage() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+
+  const [managedProductTypes, setManagedProductTypes] = useState([]);
+  const [loadingProductTypes, setLoadingProductTypes] = useState(false);
+  const [productTypesError, setProductTypesError] = useState("");
 
   const sortedProducts = useMemo(() => {
     return [...(products || [])].sort((a, b) => {
@@ -421,33 +506,43 @@ function AdminProductsPage() {
   }, [origins]);
 
   const typeOptions = useMemo(() => {
+    const activeManagedTypes = managedProductTypes
+      .filter((productType) => productType.activo !== false)
+      .map((productType) => productType.nombre)
+      .filter(Boolean);
+
     const tiposFromProducts = (products || [])
       .flatMap((product) => normalizeTiposFromProduct(product))
       .filter(Boolean);
 
-    const allTypes = [...baseProductTypes, ...tiposFromProducts];
+    const allTypes = uniqueText([
+      ...baseProductTypes,
+      ...activeManagedTypes,
+      ...tiposFromProducts
+    ]);
 
-    const uniqueTypes = allTypes.reduce((accumulator, type) => {
-      const cleanType = type.trim();
+    return allTypes
+      .map((type) => {
+        const managedType = managedProductTypes.find(
+          (productType) =>
+            normalizeText(productType.nombre) === normalizeText(type)
+        );
 
-      if (!cleanType) return accumulator;
+        if (managedType) {
+          return {
+            ...managedType,
+            id: getId(managedType) || managedType.nombre,
+            nombre: managedType.nombre
+          };
+        }
 
-      const alreadyExists = accumulator.some(
-        (item) => normalizeText(item) === normalizeText(cleanType)
-      );
-
-      if (!alreadyExists) accumulator.push(cleanType);
-
-      return accumulator;
-    }, []);
-
-    return uniqueTypes
-      .map((type) => ({
-        id: type,
-        nombre: type
-      }))
+        return {
+          id: type,
+          nombre: type
+        };
+      })
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
-  }, [products]);
+  }, [products, managedProductTypes]);
 
   const characterOptions = useMemo(() => {
     const selectedSerie = normalizeText(form.serieNombre);
@@ -476,6 +571,52 @@ function AdminProductsPage() {
   const selectedAvailability = disponibilidadOptions.find(
     (option) => option.value === form.disponibilidad
   );
+
+  const refreshProductTypes = async () => {
+    setLoadingProductTypes(true);
+    setProductTypesError("");
+
+    try {
+      const data = await apiGetProductTypes({
+        activos: "false"
+      });
+
+      const list = pickProductTypes(data).map(normalizeProductTypeFromApi);
+
+      setManagedProductTypes((currentTypes) => {
+        const mergedTypes = [...currentTypes];
+
+        list.forEach((productType) => {
+          const existingIndex = mergedTypes.findIndex(
+            (item) =>
+              getId(item) === getId(productType) ||
+              normalizeText(item.nombre) === normalizeText(productType.nombre)
+          );
+
+          if (existingIndex >= 0) {
+            mergedTypes[existingIndex] = {
+              ...mergedTypes[existingIndex],
+              ...productType
+            };
+          } else {
+            mergedTypes.push(productType);
+          }
+        });
+
+        return mergedTypes;
+      });
+    } catch (error) {
+      setProductTypesError(
+        error.message || "No se pudieron cargar los tipos de producto."
+      );
+    } finally {
+      setLoadingProductTypes(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshProductTypes();
+  }, []);
 
   const setImagesAndTouch = (updater) => {
     setImagesTouched(true);
@@ -564,6 +705,89 @@ function AdminProductsPage() {
     id: `temp-${Date.now()}-${name}`,
     nombre: name
   });
+
+  const handleCreateProductType = async (name) => {
+    const cleanName = name?.trim();
+
+    if (!cleanName) {
+      return null;
+    }
+
+    const existingType = typeOptions.find(
+      (option) => normalizeText(option.nombre) === normalizeText(cleanName)
+    );
+
+    if (existingType) {
+      return existingType;
+    }
+
+    try {
+      const data = await apiCreateProductType({
+        nombre: cleanName,
+        descripcion: "Tipo de producto creado rápidamente desde productos.",
+        orden: 0,
+        activo: true
+      });
+
+      const createdProductType = normalizeProductTypeFromApi(
+        data.productType || data.tipoProducto || data.data || data
+      );
+
+      const option = {
+        ...createdProductType,
+        id: getId(createdProductType) || cleanName,
+        nombre: createdProductType.nombre || cleanName
+      };
+
+      setManagedProductTypes((currentTypes) => {
+        const exists = currentTypes.some(
+          (item) =>
+            getId(item) === getId(option) ||
+            normalizeText(item.nombre) === normalizeText(option.nombre)
+        );
+
+        if (exists) {
+          return currentTypes.map((item) =>
+            getId(item) === getId(option) ||
+            normalizeText(item.nombre) === normalizeText(option.nombre)
+              ? {
+                  ...item,
+                  ...option,
+                  activo: option.activo !== false
+                }
+              : item
+          );
+        }
+
+        return [option, ...currentTypes];
+      });
+
+      return option;
+    } catch (error) {
+      const fallbackOption = {
+        id: `temp-product-type-${Date.now()}-${cleanName}`,
+        nombre: cleanName,
+        activo: true
+      };
+
+      setManagedProductTypes((currentTypes) => {
+        const exists = currentTypes.some(
+          (item) => normalizeText(item.nombre) === normalizeText(cleanName)
+        );
+
+        if (exists) return currentTypes;
+
+        return [fallbackOption, ...currentTypes];
+      });
+
+      setMessage(
+        error.message ||
+          "No se pudo guardar el tipo de producto en la sección global, pero se usará en este producto."
+      );
+
+      return fallbackOption;
+    }
+  };
 
   const ensureCategoryExists = async () => {
     const categoryName = form.categoriaNombre.trim();
@@ -739,9 +963,9 @@ function AdminProductsPage() {
     const serie = await ensureSeriesExists(origin);
     const event = await ensureEventExists({ origin, serie });
 
-    const tiposProducto = Array.isArray(form.tiposProducto)
-      ? form.tiposProducto.map((item) => item.trim()).filter(Boolean)
-      : [];
+    const tiposProducto = uniqueText(
+      Array.isArray(form.tiposProducto) ? form.tiposProducto : []
+    );
 
     const tiposProductoTexto = tiposProducto.join(", ");
 
@@ -836,6 +1060,10 @@ function AdminProductsPage() {
     );
 
     try {
+      for (const productTypeName of form.tiposProducto) {
+        await handleCreateProductType(productTypeName);
+      }
+
       for (const characterName of form.personajesNombre) {
         await createCharacterQuick({
           name: characterName,
@@ -854,7 +1082,7 @@ function AdminProductsPage() {
       }
 
       resetForm();
-      await refreshProducts?.();
+      await Promise.all([refreshProducts?.(), refreshProductTypes()]);
     } catch (error) {
       setMessage(error.message || "No se pudo guardar el producto.");
     } finally {
@@ -901,26 +1129,41 @@ function AdminProductsPage() {
             <h2 className="text-4xl font-black">Gestión de productos</h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Crea y edita productos sin romper imágenes existentes. Si solo
-              cambias evento, series, categoría, tipos de producto, precio,
-              stock u origen, las imágenes se conservan tal como estaban.
+              Crea y edita productos sin romper imágenes existentes. Los tipos
+              de producto se cargan desde la sección global, pero también se
+              conservan los tipos antiguos que ya existían en productos previos.
             </p>
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
             {view === "list" && (
-              <button
-                type="button"
-                onClick={refreshProducts}
-                disabled={loadingProducts || saving}
-                className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                <RefreshCw
-                  size={18}
-                  className={loadingProducts ? "animate-spin" : ""}
-                />
-                Recargar
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={refreshProductTypes}
+                  disabled={loadingProductTypes || saving}
+                  className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <RefreshCw
+                    size={18}
+                    className={loadingProductTypes ? "animate-spin" : ""}
+                  />
+                  Tipos
+                </button>
+
+                <button
+                  type="button"
+                  onClick={refreshProducts}
+                  disabled={loadingProducts || saving}
+                  className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <RefreshCw
+                    size={18}
+                    className={loadingProducts ? "animate-spin" : ""}
+                  />
+                  Recargar
+                </button>
+              </>
             )}
 
             {view === "list" ? (
@@ -950,13 +1193,15 @@ function AdminProductsPage() {
         storageError ||
         productLoadError ||
         categoriesLoadError ||
-        originsLoadError) && (
+        originsLoadError ||
+        productTypesError) && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
           {message ||
             storageError ||
             productLoadError ||
             categoriesLoadError ||
-            originsLoadError}
+            originsLoadError ||
+            productTypesError}
         </div>
       )}
 
@@ -1012,7 +1257,7 @@ function AdminProductsPage() {
                 onChange={handleChange}
                 rows="3"
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Escribe una descripción visible en el detalle del producto. Si lo dejas vacío, se mostrará el texto por defecto."
+                placeholder="Escribe una descripción visible en el detalle del producto."
               />
             </label>
 
@@ -1067,7 +1312,7 @@ function AdminProductsPage() {
               emptyLabel="Sin evento"
               emptyCreateLabel="Agregar evento"
               createLabel={(name) => `Agregar “${name}” a eventos`}
-              helperText="Si no existe, se creará y quedará guardado en MongoDB al guardar el producto. El evento podrá vincularse a muchas series."
+              helperText="Si no existe, se creará y quedará guardado en MongoDB al guardar el producto."
             />
 
             <CreatableSelect
@@ -1094,17 +1339,17 @@ function AdminProductsPage() {
               onChange={(values) =>
                 setForm((currentForm) => ({
                   ...currentForm,
-                  tiposProducto: values,
-                  tipoProducto: values.join(", ")
+                  tiposProducto: uniqueText(values),
+                  tipoProducto: uniqueText(values).join(", ")
                 }))
               }
-              onCreate={handleSimpleCreatableCreate}
+              onCreate={handleCreateProductType}
               options={typeOptions}
               placeholder="Stand, llavero, photocard..."
               emptyLabel="Sin tipos de producto"
               emptyCreateLabel="Agregar tipo de producto"
               createLabel={(name) => `Agregar “${name}” a tipo de producto`}
-              helperText="Un producto puede tener uno o más tipos de producto. Ejemplo: stand de acrílico y llavero."
+              helperText="Un producto puede tener uno o más tipos de producto. No se borran los tipos existentes: se mezclan los tipos globales con los usados anteriormente."
             />
 
             <label className="grid gap-2 text-sm font-black">
