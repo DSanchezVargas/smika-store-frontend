@@ -76,36 +76,54 @@ function buildStoredProduct(product) {
 
 
 function parseInlineMarkdown(text = "") {
-  const parts = text.split(/(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*)/g);
+  const source = String(text || "");
+  const tokens = [];
+  const pattern = /(\*\*.+?\*\*|__.+?__|\*.+?\*)/g;
 
-  return parts.map((part, index) => {
-    if (!part) return null;
+  let lastIndex = 0;
+  let match;
 
-    if (part.startsWith("**") && part.endsWith("**")) {
-      return (
-        <strong key={`${part}-${index}`} className="font-black text-[#2F2F2F]">
-          {part.slice(2, -2)}
+  while ((match = pattern.exec(source)) !== null) {
+    if (match.index > lastIndex) {
+      tokens.push(source.slice(lastIndex, match.index));
+    }
+
+    const token = match[0];
+    const key = `${token}-${match.index}`;
+
+    if (token.startsWith("**") && token.endsWith("**")) {
+      tokens.push(
+        <strong key={key} className="font-black text-[#2F2F2F]">
+          {token.slice(2, -2)}
         </strong>
       );
-    }
-
-    if (part.startsWith("__") && part.endsWith("__")) {
-      return (
-        <span key={`${part}-${index}`} className="underline decoration-2 underline-offset-4">
-          {part.slice(2, -2)}
+    } else if (token.startsWith("__") && token.endsWith("__")) {
+      tokens.push(
+        <span key={key} className="underline decoration-2 underline-offset-4">
+          {token.slice(2, -2)}
         </span>
       );
-    }
-
-    if (part.startsWith("*") && part.endsWith("*")) {
-      return (
-        <em key={`${part}-${index}`} className="italic">
-          {part.slice(1, -1)}
+    } else if (token.startsWith("*") && token.endsWith("*")) {
+      tokens.push(
+        <em key={key} className="italic">
+          {token.slice(1, -1)}
         </em>
       );
     }
 
-    return part;
+    lastIndex = match.index + token.length;
+  }
+
+  if (lastIndex < source.length) {
+    tokens.push(source.slice(lastIndex));
+  }
+
+  return tokens.map((token, index) => {
+    if (typeof token === "string") {
+      return <span key={`text-${index}`}>{token}</span>;
+    }
+
+    return token;
   });
 }
 
@@ -113,16 +131,28 @@ function FormattedProductDescription({ description }) {
   const fallbackDescription =
     "Producto registrado en Smika Store. Aquí se muestra la información disponible del producto, incluyendo serie, tipo, disponibilidad, precio referencial e imágenes.";
 
-  const text = description?.trim() || fallbackDescription;
-  const lines = text.split(/\r?\n/);
+  const text = String(description || "").trim() || fallbackDescription;
+  const lines = text.replace(/\\n/g, "\n").split(/\r?\n/);
 
   return (
-    <div className="mt-6 space-y-3 text-gray-600 leading-8">
-      {lines.map((line, index) => (
-        <p key={`${line}-${index}`} className={line.trim() ? "" : "h-4"}>
-          {line.trim() ? parseInlineMarkdown(line) : <span>&nbsp;</span>}
-        </p>
-      ))}
+    <div className="mt-6 rounded-[28px] bg-[#F8F6F7] p-5 text-gray-700 leading-8">
+      <p className="mb-3 text-sm font-black text-[#87CCC8]">
+        Descripción
+      </p>
+
+      <div className="space-y-3 whitespace-pre-wrap break-words">
+        {lines.map((line, index) => {
+          if (!line.trim()) {
+            return <div key={`empty-${index}`} className="h-3" />;
+          }
+
+          return (
+            <p key={`${line}-${index}`}>
+              {parseInlineMarkdown(line)}
+            </p>
+          );
+        })}
+      </div>
     </div>
   );
 }

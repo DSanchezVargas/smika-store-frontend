@@ -33,6 +33,10 @@ function saveLocalArray(key, value) {
   }
 }
 
+function notifyLocalUserDataChanged() {
+  window.dispatchEvent(new Event("smika:user-data-updated"));
+}
+
 function getProductId(product) {
   return product?._id || product?.mongoId || product?.productId || product?.id || "";
 }
@@ -255,12 +259,14 @@ function ProductCard({ product }) {
       });
 
       saveLocalArray(FAVORITES_KEY, nextFavorites);
+      notifyLocalUserDataChanged();
       setIsFavorite(false);
       showTemporaryMessage("Favorito quitado.");
       return;
     }
 
     saveLocalArray(FAVORITES_KEY, [...favorites, favoriteItem]);
+    notifyLocalUserDataChanged();
     setIsFavorite(true);
     showTemporaryMessage("Producto guardado como favorito.");
   };

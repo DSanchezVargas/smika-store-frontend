@@ -30,6 +30,7 @@ import AdminOriginsPage from "./pages/admin/AdminOriginsPage";
 import AdminUsersPage from "./pages/admin/AdminUsersPage";
 import AdminSubadminsPage from "./pages/admin/AdminSubadminsPage";
 import AdminSettingsPage from "./pages/admin/AdminSettingsPage";
+import AdminClientIssuesPage from "./pages/admin/AdminClientIssuesPage";
 
 function App() {
   return (
@@ -106,6 +107,7 @@ function App() {
           <Route path="origenes" element={<AdminOriginsPage />} />
           <Route path="usuarios" element={<AdminUsersPage />} />
           <Route path="subadmins" element={<AdminSubadminsPage />} />
+          <Route path="incidencias" element={<AdminClientIssuesPage />} />
           <Route path="configuracion" element={<AdminSettingsPage />} />
         </Route>
       </Route>

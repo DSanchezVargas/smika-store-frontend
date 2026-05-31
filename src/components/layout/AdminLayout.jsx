@@ -9,6 +9,7 @@ import {
   Globe2,
   LayoutDashboard,
   Menu,
+  MessageSquare,
   Settings,
   ShieldCheck,
   Sparkles,
@@ -86,6 +87,12 @@ const adminNavigation = [
     label: "Pedidos",
     path: "/admin/pedidos",
     icon: BarChart3,
+    priorityGroup: "principal"
+  },
+  {
+    label: "Incidencias de clientes",
+    path: "/admin/incidencias",
+    icon: MessageSquare,
     priorityGroup: "principal"
   },
   {
