@@ -8,7 +8,8 @@ import {
   Heart,
   Image as ImageIcon,
   Settings,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Sparkles
 } from "lucide-react";
 
 import AutoCarousel from "../../components/common/AutoCarousel";
@@ -62,6 +63,20 @@ function getImageSource(image) {
   return "";
 }
 
+function uniqueImages(images = []) {
+  const seen = new Set();
+
+  return images
+    .map(getImageSource)
+    .filter(Boolean)
+    .filter((image) => {
+      if (seen.has(image)) return false;
+
+      seen.add(image);
+      return true;
+    });
+}
+
 function getEventTitle(event) {
   return event?.titulo || event?.nombre || event?.title || "Evento Smika";
 }
@@ -78,10 +93,14 @@ function getEventCarouselImages(event) {
   const coverImage = getEventCoverImage(event);
 
   const images = Array.isArray(event?.imagenes)
-    ? event.imagenes.map(getImageSource).filter(Boolean)
+    ? uniqueImages(event.imagenes)
     : [];
 
   return images.filter((image) => image !== coverImage);
+}
+
+function getEventGalleryImages(event) {
+  return uniqueImages([getEventCoverImage(event), ...getEventCarouselImages(event)]);
 }
 
 function getEventSeries(event) {
@@ -170,10 +189,6 @@ function getProductTypes(product) {
   return uniqueTypes.length > 0 ? uniqueTypes : ["Producto"];
 }
 
-function getProductTypeText(product) {
-  return getProductTypes(product).join(", ");
-}
-
 function getProductCharacters(product) {
   const characters = [
     ...normalizeArrayText(product?.personajesNombre),
@@ -228,7 +243,7 @@ function getEventStatus(event) {
 function isUpcomingEvent(event) {
   const status = getEventStatus(event);
 
-  return status === "proximo";
+  return status === "proximo" || status === "preventa";
 }
 
 function isActiveEvent(event) {
@@ -336,6 +351,113 @@ function getUserPreferenceKey(user) {
 
 function getEventPreferenceId(event) {
   return getId(event) || getEventSlug(event);
+}
+
+function EventGallery({ event, title }) {
+  const galleryImages = getEventGalleryImages(event);
+  const coverImage = getEventCoverImage(event);
+  const carouselImages = getEventCarouselImages(event);
+
+  if (galleryImages.length === 0) {
+    return (
+      <div className="rounded-[36px] bg-white p-8 smika-shadow border border-[#87CCC8]/20">
+        <div className="flex h-80 items-center justify-center rounded-[28px] bg-[#F8F6F7] text-gray-400">
+          <div className="text-center">
+            <ImageIcon size={52} className="mx-auto" />
+            <p className="mt-3 font-black">Sin imágenes para este evento</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[36px] bg-white p-5 smika-shadow border border-[#87CCC8]/20">
+      <div className="flex flex-wrap items-end justify-between gap-3 px-1 pb-4">
+        <div>
+          <p className="flex items-center gap-2 text-[#87CCC8] font-black">
+            <Sparkles size={18} />
+            Galería del evento
+          </p>
+
+          <h3 className="mt-1 text-2xl font-black">
+            Portada e imágenes principales
+          </h3>
+        </div>
+
+        <p className="rounded-full bg-[#F8F6F7] px-4 py-2 text-xs font-black text-gray-600">
+          {galleryImages.length} imagen{galleryImages.length === 1 ? "" : "es"}
+        </p>
+      </div>
+
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <div className="rounded-[32px] bg-[#F8F6F7] p-3">
+          <AutoCarousel
+            images={galleryImages}
+            alt={`${title} galería`}
+            heightClassName="h-[340px] md:h-[480px]"
+            fit="contain"
+            className="bg-white"
+            showEmpty
+          />
+        </div>
+
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-1">
+          <div className="rounded-[32px] bg-[#F8F6F7] p-4">
+            <p className="mb-3 text-sm font-black">Portada</p>
+
+            <div className="flex h-52 items-center justify-center overflow-hidden rounded-[24px] bg-white">
+              {coverImage ? (
+                <img
+                  src={coverImage}
+                  alt={`${title} portada`}
+                  className="h-full w-full object-contain"
+                  loading="lazy"
+                />
+              ) : (
+                <ImageIcon size={36} className="text-gray-400" />
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-[32px] bg-[#F8F6F7] p-4">
+            <p className="mb-3 text-sm font-black">Imágenes del carrusel</p>
+
+            {carouselImages.length > 0 ? (
+              <div className="grid grid-cols-2 gap-3">
+                {carouselImages.slice(0, 4).map((image, index) => (
+                  <a
+                    key={`${image}-${index}`}
+                    href={image}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="group relative flex h-24 items-center justify-center overflow-hidden rounded-[20px] bg-white"
+                  >
+                    <img
+                      src={image}
+                      alt={`${title} miniatura ${index + 1}`}
+                      className="h-full w-full object-contain transition duration-300 group-hover:scale-105"
+                      loading="lazy"
+                    />
+
+                    {index === 3 && carouselImages.length > 4 && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/45 text-sm font-black text-white">
+                        +{carouselImages.length - 4}
+                      </div>
+                    )}
+                  </a>
+                ))}
+              </div>
+            ) : (
+              <div className="flex h-24 items-center justify-center rounded-[20px] bg-white text-sm font-black text-gray-400">
+                Sin imágenes adicionales
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function EventDetailPage() {
@@ -536,9 +658,6 @@ function EventDetailPage() {
     );
   }
 
-  const coverImage = getEventCoverImage(event);
-  const carouselImages = getEventCarouselImages(event);
-
   return (
     <section className="container-smika py-12">
       <div className="rounded-[32px] bg-[#F8F6F7] p-8 mb-8">
@@ -547,34 +666,8 @@ function EventDetailPage() {
         <h2 className="text-4xl font-black mt-2">{eventTitle}</h2>
       </div>
 
-      <div className="smika-card smika-shadow overflow-hidden mb-8">
-        <div className="h-[440px] bg-[#F8F6F7]">
-          {coverImage ? (
-            <img
-              src={coverImage}
-              alt={`${eventTitle} portada`}
-              className="h-full w-full object-contain"
-              loading="lazy"
-            />
-          ) : (
-            <div className="flex h-full items-center justify-center text-gray-400">
-              <ImageIcon size={52} />
-            </div>
-          )}
-        </div>
-
-        {carouselImages.length > 0 && (
-          <div className="border-t border-[#87CCC8]/20 p-5">
-            <p className="mb-3 font-black">Galería del evento</p>
-
-            <AutoCarousel
-              images={carouselImages}
-              alt={`${eventTitle} carrusel`}
-              heightClassName="h-72"
-              fit="contain"
-            />
-          </div>
-        )}
+      <div className="mb-8">
+        <EventGallery event={event} title={eventTitle} />
       </div>
 
       <div className="rounded-[32px] bg-[#F8F6F7] p-8 mb-8">
@@ -585,11 +678,11 @@ function EventDetailPage() {
               {formatDate(event.fechaInicio || event.date)}
             </div>
 
-            <p className="mt-4 text-gray-700 max-w-4xl leading-7">
+            <div className="mt-4 max-w-4xl whitespace-pre-line text-gray-700 leading-8">
               {event.descripcion ||
                 event.description ||
                 "Evento registrado por Smika Store."}
-            </p>
+            </div>
 
             <div className="mt-5 flex flex-wrap gap-3 text-sm font-bold">
               <span className="rounded-full bg-white px-4 py-2">
