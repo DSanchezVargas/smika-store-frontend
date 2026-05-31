@@ -20,6 +20,10 @@ import {
   createProductType as apiCreateProductType,
   getProductTypes as apiGetProductTypes
 } from "../../services/productTypeService";
+import {
+  getAvailabilities as apiGetAvailabilities,
+  syncAvailabilities as apiSyncAvailabilities
+} from "../../services/availabilityService";
 
 const initialForm = {
   nombre: "",
@@ -55,30 +59,34 @@ const baseProductTypes = [
   "Pack"
 ];
 
-const disponibilidadOptions = [
+const baseAvailabilityOptions = [
   {
     id: "stock",
     nombre: "En stock",
     value: "stock",
-    estado: "Activo"
+    estado: "Activo",
+    esDefault: true
   },
   {
     id: "preventa",
     nombre: "Preventa",
     value: "preventa",
-    estado: "Preventa"
+    estado: "Preventa",
+    esDefault: true
   },
   {
     id: "por_pedido",
     nombre: "Por pedido",
     value: "por_pedido",
-    estado: "Por pedido"
+    estado: "Por pedido",
+    esDefault: true
   },
   {
     id: "agotado",
     nombre: "Agotado",
     value: "agotado",
-    estado: "Agotado"
+    estado: "Agotado",
+    esDefault: true
   }
 ];
 
@@ -426,6 +434,68 @@ function normalizeProductTypeFromApi(productType = {}) {
   };
 }
 
+function createAvailabilityValue(text = "") {
+  return normalizeText(text)
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function pickAvailabilities(data) {
+  if (Array.isArray(data?.availabilities)) return data.availabilities;
+  if (Array.isArray(data?.disponibilidades)) return data.disponibilidades;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data)) return data;
+
+  return [];
+}
+
+function normalizeAvailabilityFromApi(availability = {}) {
+  const nombre = availability.nombre || availability.name || availability.label || "";
+  const value =
+    availability.value || availability.valor || createAvailabilityValue(nombre);
+
+  return {
+    ...availability,
+    id: getId(availability) || value || nombre,
+    _id: getId(availability),
+    nombre: nombre || value || "Disponibilidad",
+    value: value || createAvailabilityValue(nombre),
+    estado: availability.estado || "Activo",
+    descripcion: availability.descripcion || "",
+    orden: Number(availability.orden || 0),
+    esDefault: Boolean(availability.esDefault),
+    usageCount: Number(availability.usageCount || availability.usos || 0)
+  };
+}
+
+function mergeAvailabilityOptions(options = []) {
+  return options.reduce((accumulator, option) => {
+    const normalizedOption = normalizeAvailabilityFromApi(option);
+
+    if (!normalizedOption.value) return accumulator;
+
+    const exists = accumulator.some((item) => {
+      return (
+        normalizeText(item.value) === normalizeText(normalizedOption.value) ||
+        normalizeText(item.nombre) === normalizeText(normalizedOption.nombre)
+      );
+    });
+
+    if (!exists) accumulator.push(normalizedOption);
+
+    return accumulator;
+  }, []);
+}
+
+function getAvailabilityLabel(value = "", options = []) {
+  const found = options.find(
+    (option) => normalizeText(option.value) === normalizeText(value)
+  );
+
+  return found?.nombre || value || "En stock";
+}
+
 function AdminProductsPage() {
   const {
     products,
@@ -465,6 +535,10 @@ function AdminProductsPage() {
   const [managedProductTypes, setManagedProductTypes] = useState([]);
   const [loadingProductTypes, setLoadingProductTypes] = useState(false);
   const [productTypesError, setProductTypesError] = useState("");
+
+  const [managedAvailabilities, setManagedAvailabilities] = useState([]);
+  const [loadingAvailabilities, setLoadingAvailabilities] = useState(false);
+  const [availabilitiesError, setAvailabilitiesError] = useState("");
 
   const sortedProducts = useMemo(() => {
     return [...(products || [])].sort((a, b) => {
@@ -568,8 +642,47 @@ function AdminProductsPage() {
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [characters, form.serieNombre]);
 
-  const selectedAvailability = disponibilidadOptions.find(
-    (option) => option.value === form.disponibilidad
+  const availabilityOptions = useMemo(() => {
+    const valuesFromProducts = (products || [])
+      .map((product) => product?.disponibilidad)
+      .filter(Boolean)
+      .map((value) => ({
+        id: value,
+        nombre: getAvailabilityLabel(value, managedAvailabilities),
+        value,
+        estado: "Activo",
+        fromProduct: true
+      }));
+
+    const currentValue = form.disponibilidad
+      ? [
+          {
+            id: form.disponibilidad,
+            nombre: getAvailabilityLabel(form.disponibilidad, managedAvailabilities),
+            value: form.disponibilidad,
+            estado: form.estado || "Activo",
+            fromProduct: true
+          }
+        ]
+      : [];
+
+    return mergeAvailabilityOptions([
+      ...baseAvailabilityOptions,
+      ...managedAvailabilities,
+      ...valuesFromProducts,
+      ...currentValue
+    ]).sort((a, b) => {
+      const orderA = Number(a.orden || 0);
+      const orderB = Number(b.orden || 0);
+
+      if (orderA !== orderB) return orderA - orderB;
+
+      return (a.nombre || "").localeCompare(b.nombre || "");
+    });
+  }, [products, managedAvailabilities, form.disponibilidad, form.estado]);
+
+  const selectedAvailability = availabilityOptions.find(
+    (option) => normalizeText(option.value) === normalizeText(form.disponibilidad)
   );
 
   const refreshProductTypes = async () => {
@@ -614,8 +727,49 @@ function AdminProductsPage() {
     }
   };
 
+  const refreshAvailabilities = async () => {
+    setLoadingAvailabilities(true);
+    setAvailabilitiesError("");
+
+    try {
+      const data = await apiGetAvailabilities();
+      const list = pickAvailabilities(data).map(normalizeAvailabilityFromApi);
+
+      setManagedAvailabilities(list);
+    } catch (error) {
+      setAvailabilitiesError(
+        error.message || "No se pudieron cargar las disponibilidades."
+      );
+    } finally {
+      setLoadingAvailabilities(false);
+    }
+  };
+
+  const handleSyncAvailabilities = async () => {
+    setLoadingAvailabilities(true);
+    setAvailabilitiesError("");
+    setMessage("Sincronizando disponibilidades usadas en productos...");
+
+    try {
+      const data = await apiSyncAvailabilities();
+      const list = pickAvailabilities(data).map(normalizeAvailabilityFromApi);
+
+      setManagedAvailabilities(list);
+      setMessage(
+        data.message || "Disponibilidades sincronizadas correctamente."
+      );
+    } catch (error) {
+      setAvailabilitiesError(
+        error.message || "No se pudieron sincronizar las disponibilidades."
+      );
+    } finally {
+      setLoadingAvailabilities(false);
+    }
+  };
+
   useEffect(() => {
     refreshProductTypes();
+    refreshAvailabilities();
   }, []);
 
   const setImagesAndTouch = (updater) => {
@@ -690,14 +844,16 @@ function AdminProductsPage() {
   };
 
   const handleAvailabilityChange = (value) => {
-    const option = disponibilidadOptions.find((item) => item.nombre === value);
+    const option = availabilityOptions.find(
+      (item) => normalizeText(item.value) === normalizeText(value)
+    );
 
     if (!option) return;
 
     setForm((currentForm) => ({
       ...currentForm,
       disponibilidad: option.value,
-      estado: option.estado
+      estado: option.estado || currentForm.estado || "Activo"
     }));
   };
 
@@ -1133,7 +1289,11 @@ function AdminProductsPage() {
       }
 
       resetForm();
-      await Promise.all([refreshProducts?.(), refreshProductTypes()]);
+      await Promise.all([
+        refreshProducts?.(),
+        refreshProductTypes(),
+        refreshAvailabilities()
+      ]);
     } catch (error) {
       setMessage(error.message || "No se pudo guardar el producto.");
     } finally {
@@ -1181,8 +1341,8 @@ function AdminProductsPage() {
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
               Crea y edita productos sin romper imágenes existentes. Los tipos
-              de producto se cargan desde la sección global, pero también se
-              conservan los tipos antiguos que ya existían en productos previos.
+              de producto se cargan desde la sección global y la disponibilidad
+              ahora viene desde Gestión de disponibilidades.
             </p>
           </div>
 
@@ -1200,6 +1360,19 @@ function AdminProductsPage() {
                     className={loadingProductTypes ? "animate-spin" : ""}
                   />
                   Tipos
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleSyncAvailabilities}
+                  disabled={loadingAvailabilities || saving}
+                  className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <RefreshCw
+                    size={18}
+                    className={loadingAvailabilities ? "animate-spin" : ""}
+                  />
+                  Disponibilidad
                 </button>
 
                 <button
@@ -1245,14 +1418,16 @@ function AdminProductsPage() {
         productLoadError ||
         categoriesLoadError ||
         originsLoadError ||
-        productTypesError) && (
+        productTypesError ||
+        availabilitiesError) && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
           {message ||
             storageError ||
             productLoadError ||
             categoriesLoadError ||
             originsLoadError ||
-            productTypesError}
+            productTypesError ||
+            availabilitiesError}
         </div>
       )}
 
@@ -1440,15 +1615,24 @@ function AdminProductsPage() {
               />
             </label>
 
-            <CreatableSelect
-              label="Disponibilidad"
-              value={selectedAvailability?.nombre || "En stock"}
-              onChange={handleAvailabilityChange}
-              options={disponibilidadOptions}
-              placeholder="Seleccionar disponibilidad"
-              emptyLabel="En stock"
-              disabled={false}
-            />
+            <label className="grid gap-2 text-sm font-black">
+              Disponibilidad
+              <select
+                value={selectedAvailability?.value || form.disponibilidad || "stock"}
+                onChange={(event) => handleAvailabilityChange(event.target.value)}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              >
+                {availabilityOptions.map((option) => (
+                  <option key={`${option.value}-${option.id}`} value={option.value}>
+                    {option.nombre}
+                    {option.fromProduct ? " · usado en productos" : ""}
+                  </option>
+                ))}
+              </select>
+              <span className="text-xs font-medium text-gray-500 leading-5">
+                Las opciones vienen de Gestión de disponibilidades. Para crear o borrar duplicados, entra a /admin/disponibilidades.
+              </span>
+            </label>
 
             <label className="grid gap-2 text-sm font-black">
               Mensaje de disponibilidad / tiempo estimado
@@ -1695,10 +1879,14 @@ function AdminProductsPage() {
                           <strong>Stock:</strong> {product.stock || 0}
                         </p>
 
+                        <p>
+                          <strong>Disponibilidad:</strong>{" "}
+                          {getAvailabilityLabel(product.disponibilidad, availabilityOptions)}
+                        </p>
+
                         {product.tiempoEstimado && (
                           <p>
-                            <strong>Disponibilidad:</strong>{" "}
-                            {product.tiempoEstimado}
+                            <strong>Mensaje:</strong> {product.tiempoEstimado}
                           </p>
                         )}
 

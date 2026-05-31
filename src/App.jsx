@@ -21,6 +21,7 @@ import AdminProductsPage from "./pages/admin/AdminProductsPage";
 import AdminProductTypesPage from "./pages/admin/AdminProductTypesPage";
 import AdminOrdersPage from "./pages/admin/AdminOrdersPage";
 import AdminEventsPage from "./pages/admin/AdminEventsPage";
+import AdminEventTypesPage from "./pages/admin/AdminEventTypesPage";
 import AdminSeriesPage from "./pages/admin/AdminSeriesPage";
 import AdminCategoriesPage from "./pages/admin/AdminCategoriesPage";
 import AdminCharactersPage from "./pages/admin/AdminCharactersPage";
@@ -97,6 +98,7 @@ function App() {
           <Route path="tipos-producto" element={<AdminProductTypesPage />} />
           <Route path="pedidos" element={<AdminOrdersPage />} />
           <Route path="eventos" element={<AdminEventsPage />} />
+          <Route path="tipos-evento" element={<AdminEventTypesPage />} />
           <Route path="series" element={<AdminSeriesPage />} />
           <Route path="categorias" element={<AdminCategoriesPage />} />
           <Route path="personajes" element={<AdminCharactersPage />} />

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowLeft,
   CalendarDays,
@@ -16,6 +16,10 @@ import ImageDropzone from "../../components/admin/ImageDropzone";
 import CreatableSelect from "../../components/admin/CreatableSelect";
 import MultiCreatableSelect from "../../components/admin/MultiCreatableSelect";
 import { useAdminData } from "../../context/AdminDataContext";
+import {
+  createEventType as apiCreateEventType,
+  getEventTypes as apiGetEventTypes
+} from "../../services/eventTypeService";
 
 const initialForm = {
   titulo: "",
@@ -24,6 +28,7 @@ const initialForm = {
   origenNombre: "Variado",
   pais: "V",
   tipoEvento: "Otro",
+  tiposEvento: ["Otro"],
   fechaInicio: "",
   fechaFin: "",
   estado: "proximo",
@@ -34,35 +39,31 @@ const initialForm = {
 };
 
 const eventStatusOptions = [
-  {
-    value: "proximo",
-    label: "Próximo"
-  },
-  {
-    value: "preventa",
-    label: "Preventa"
-  },
-  {
-    value: "activo",
-    label: "Activo"
-  },
-  {
-    value: "finalizado",
-    label: "Finalizado"
-  },
-  {
-    value: "cancelado",
-    label: "Cancelado"
-  }
+  { value: "proximo", label: "Próximo" },
+  { value: "preventa", label: "Preventa" },
+  { value: "activo", label: "Activo" },
+  { value: "finalizado", label: "Finalizado" },
+  { value: "cancelado", label: "Cancelado" }
 ];
 
-const baseEventTypes = ["Lebom", "Café", "Fantazit", "Otro"];
+const baseEventTypes = [
+  "Lebom",
+  "Café",
+  "Fantazit",
+  "Preventa",
+  "Evento actual",
+  "Evento próximo",
+  "Pop up",
+  "Campaña",
+  "Colaboración",
+  "Otro"
+];
+
 const baseEventCategories = ["Eventos", "Preventa", "Cronograma", "Campaña"];
 const baseOrigins = ["China", "Corea", "Japón", "Variado"];
 
 function getId(item) {
   if (!item) return "";
-
   if (typeof item === "string") return item;
 
   return item._id || item.id || "";
@@ -70,14 +71,9 @@ function getId(item) {
 
 function getName(item, fallback = "") {
   if (!item) return fallback;
-
   if (typeof item === "string") return item;
 
   return item.nombre || item.titulo || item.name || fallback;
-}
-
-function isMongoObjectId(value) {
-  return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
 }
 
 function normalizeText(text = "") {
@@ -103,6 +99,61 @@ function uniqueTexts(values = []) {
 
     return accumulator;
   }, []);
+}
+
+function normalizeArrayText(value) {
+  if (Array.isArray(value)) {
+    return value
+      .flatMap((item) => normalizeArrayText(item))
+      .map((item) => item.trim())
+      .filter(Boolean);
+  }
+
+  if (value && typeof value === "object") {
+    return [getName(value)].filter(Boolean);
+  }
+
+  if (!value) return [];
+
+  return value
+    .toString()
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function getEventTypesFromEvent(event) {
+  return uniqueTexts([
+    ...normalizeArrayText(event?.tiposEvento),
+    ...normalizeArrayText(event?.tipoEvento),
+    ...normalizeArrayText(event?.tipo),
+    ...normalizeArrayText(event?.eventType),
+    ...normalizeArrayText(event?.eventTypes)
+  ]);
+}
+
+function pickEventTypes(data) {
+  if (Array.isArray(data?.eventTypes)) return data.eventTypes;
+  if (Array.isArray(data?.tiposEvento)) return data.tiposEvento;
+  if (Array.isArray(data?.items)) return data.items;
+  if (Array.isArray(data?.data)) return data.data;
+  if (Array.isArray(data)) return data;
+
+  return [];
+}
+
+function normalizeEventTypeFromApi(eventType = {}) {
+  const id = getId(eventType);
+
+  return {
+    ...eventType,
+    id,
+    _id: id,
+    nombre: eventType.nombre || eventType.name || "",
+    descripcion: eventType.descripcion || "",
+    orden: Number(eventType.orden || 0),
+    activo: eventType.activo !== false
+  };
 }
 
 function getImageSource(image) {
@@ -344,7 +395,13 @@ function getAdditionalImagesFromEvent(event) {
 
 function getProductExtraLabel(product) {
   const seriesName = product?.serieNombre || product?.serie || "";
-  const typeName = product?.tipoProducto || product?.tipo || "";
+  const typeName =
+    product?.tipoProducto ||
+    product?.tipo ||
+    (Array.isArray(product?.tiposProducto)
+      ? product.tiposProducto.join(", ")
+      : "");
+
   const price = product?.precioReferencial ?? product?.precio ?? product?.price;
 
   const details = [seriesName, typeName, price ? `S/ ${price}` : ""].filter(
@@ -389,30 +446,45 @@ function ProductMultiSelect({
 
   return (
     <div className="rounded-[28px] bg-[#F8F6F7] p-5">
-      <p className="font-black">{title}</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="font-black">{title}</p>
 
-      {description && (
-        <p className="mt-1 text-sm text-gray-600 leading-6">{description}</p>
-      )}
+          {description && (
+            <p className="mt-1 text-sm text-gray-600 leading-6">
+              {description}
+            </p>
+          )}
+        </div>
+
+        <span className="rounded-full bg-white px-4 py-2 text-xs font-black">
+          {selectedIds.length} seleccionado{selectedIds.length === 1 ? "" : "s"}
+        </span>
+      </div>
 
       <input
         value={search}
         onChange={(event) => setSearch(event.target.value)}
-        className="mt-4 w-full rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3 outline-none"
+        className="mt-4 w-full rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3 text-sm outline-none"
         placeholder="Buscar producto..."
       />
 
-      <div className="mt-4 max-h-72 overflow-auto rounded-2xl bg-white p-3">
+      <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
         {filteredOptions.length > 0 ? (
           filteredOptions.map((item) => {
             const id = getId(item);
             const checked = selectedIds.includes(id);
+            const name = item.nombre || item.titulo || "Producto";
             const extra = getProductExtraLabel(item);
 
             return (
               <label
                 key={id}
-                className="flex cursor-pointer items-start gap-3 rounded-xl px-3 py-2 text-sm font-bold hover:bg-[#F7D9D8]/50"
+                className={`flex cursor-pointer items-start gap-3 rounded-2xl border px-4 py-3 transition ${
+                  checked
+                    ? "border-[#87CCC8] bg-white"
+                    : "border-transparent bg-white/70 hover:bg-white"
+                }`}
               >
                 <input
                   type="checkbox"
@@ -421,10 +493,8 @@ function ProductMultiSelect({
                   className="mt-1 h-4 w-4"
                 />
 
-                <span>
-                  <span className="block">
-                    {item.nombre || item.titulo || "Producto sin nombre"}
-                  </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block font-black">{name}</span>
 
                   {extra && (
                     <span className="mt-1 block text-xs text-gray-500">
@@ -488,6 +558,10 @@ function AdminEventsPage() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const [managedEventTypes, setManagedEventTypes] = useState([]);
+  const [loadingEventTypes, setLoadingEventTypes] = useState(false);
+  const [eventTypesError, setEventTypesError] = useState("");
+
   const sortedEvents = useMemo(() => {
     return [...(events || [])].sort((a, b) => {
       if (a.activo !== b.activo) return a.activo ? -1 : 1;
@@ -511,62 +585,77 @@ function AdminEventsPage() {
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [products]);
 
-  const activeCategories = useMemo(() => {
-    return (categories || [])
-      .filter((category) => category.activa !== false && category.activo !== false)
-      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
-  }, [categories]);
-
-  const activeOrigins = useMemo(() => {
-    return (origins || [])
-      .filter((origin) => origin.activo !== false)
-      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
-  }, [origins]);
-
   const categoryOptions = useMemo(() => {
-    const dynamicCategories = (events || []).map(
-      (event) => event.categoriaNombre || event.categoria
+    const namesFromEvents = (events || [])
+      .map((event) => event.categoriaNombre)
+      .filter(Boolean);
+
+    const realCategories = (categories || []).filter(
+      (category) => category.activo !== false && category.activa !== false
     );
 
     return buildOptionsFromNames(
-      [
-        ...baseEventCategories,
-        ...activeCategories.map(getName),
-        ...dynamicCategories
-      ],
-      activeCategories
+      [...baseEventCategories, ...namesFromEvents],
+      realCategories
     );
-  }, [events, activeCategories]);
+  }, [events, categories]);
 
   const originOptions = useMemo(() => {
-    const dynamicOrigins = (events || []).flatMap((event) => [
-      event.origenNombre,
-      event.pais
-    ]);
+    const namesFromEvents = (events || [])
+      .map((event) => event.origenNombre || event.pais)
+      .filter(Boolean);
+
+    const realOrigins = (origins || []).filter(
+      (origin) => origin.activo !== false
+    );
 
     return buildOptionsFromNames(
-      [...baseOrigins, ...activeOrigins.map(getName), ...dynamicOrigins],
-      activeOrigins
+      [...baseOrigins, ...namesFromEvents],
+      realOrigins
     );
-  }, [events, activeOrigins]);
+  }, [events, origins]);
 
-  const eventTypeSelectOptions = useMemo(() => {
-    const dynamicTypes = (events || []).flatMap((event) => [
-      event.tipoEvento,
-      event.tipo
+  const eventTypeOptions = useMemo(() => {
+    const activeManagedTypes = managedEventTypes
+      .filter((eventType) => eventType.activo !== false)
+      .map((eventType) => eventType.nombre)
+      .filter(Boolean);
+
+    const typesFromEvents = (events || [])
+      .flatMap((event) => getEventTypesFromEvent(event))
+      .filter(Boolean);
+
+    const allTypes = uniqueTexts([
+      ...baseEventTypes,
+      ...activeManagedTypes,
+      ...typesFromEvents
     ]);
 
-    return uniqueTexts([...baseEventTypes, ...dynamicTypes]).map((type) => ({
-      id: type,
-      nombre: type
-    }));
-  }, [events]);
+    return allTypes
+      .map((typeName) => {
+        const managedType = managedEventTypes.find(
+          (eventType) =>
+            normalizeText(eventType.nombre) === normalizeText(typeName)
+        );
+
+        if (managedType) {
+          return {
+            ...managedType,
+            id: getId(managedType) || managedType.nombre,
+            nombre: managedType.nombre
+          };
+        }
+
+        return {
+          id: typeName,
+          nombre: typeName
+        };
+      })
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [events, managedEventTypes]);
 
   const seriesOptions = useMemo(() => {
-    return buildOptionsFromNames(
-      activeSeries.map((serie) => serie.nombre),
-      activeSeries
-    );
+    return activeSeries.map(buildOption);
   }, [activeSeries]);
 
   const coverPreviewImages = useMemo(() => {
@@ -577,60 +666,118 @@ function AdminEventsPage() {
     return carouselImages.map(getImageSource).filter(Boolean);
   }, [carouselImages]);
 
+  const refreshEventTypes = async () => {
+    setLoadingEventTypes(true);
+    setEventTypesError("");
+
+    try {
+      const data = await apiGetEventTypes({
+        activos: "false"
+      });
+
+      const list = pickEventTypes(data).map(normalizeEventTypeFromApi);
+
+      setManagedEventTypes((currentTypes) => {
+        const mergedTypes = [...currentTypes];
+
+        list.forEach((eventType) => {
+          const existingIndex = mergedTypes.findIndex(
+            (item) =>
+              getId(item) === getId(eventType) ||
+              normalizeText(item.nombre) === normalizeText(eventType.nombre)
+          );
+
+          if (existingIndex >= 0) {
+            mergedTypes[existingIndex] = {
+              ...mergedTypes[existingIndex],
+              ...eventType
+            };
+          } else {
+            mergedTypes.push(eventType);
+          }
+        });
+
+        return mergedTypes;
+      });
+    } catch (error) {
+      setEventTypesError(
+        error.message || "No se pudieron cargar los tipos de evento."
+      );
+    } finally {
+      setLoadingEventTypes(false);
+    }
+  };
+
+  useEffect(() => {
+    refreshEventTypes();
+  }, []);
+
   const setCoverImagesTouched = (updater) => {
     setImagesTouched(true);
-    setCoverImages((currentImages) =>
-      typeof updater === "function" ? updater(currentImages) : updater
-    );
+
+    setCoverImages((currentImages) => {
+      const nextImages =
+        typeof updater === "function" ? updater(currentImages) : updater;
+
+      return Array.isArray(nextImages) ? nextImages.slice(0, 1) : [];
+    });
   };
 
   const setCarouselImagesTouched = (updater) => {
     setImagesTouched(true);
-    setCarouselImages((currentImages) =>
-      typeof updater === "function" ? updater(currentImages) : updater
-    );
+
+    setCarouselImages((currentImages) => {
+      const nextImages =
+        typeof updater === "function" ? updater(currentImages) : updater;
+
+      return Array.isArray(nextImages) ? nextImages : [];
+    });
   };
 
   const resetForm = () => {
-    setView("list");
-    setEditingEvent(null);
     setForm(initialForm);
     setCoverImages([]);
     setCarouselImages([]);
     setImagesTouched(false);
-    setMessage("");
+    setEditingEvent(null);
+    setView("list");
   };
 
   const openCreateForm = () => {
-    setView("form");
+    setMessage("");
     setEditingEvent(null);
     setForm(initialForm);
     setCoverImages([]);
     setCarouselImages([]);
     setImagesTouched(false);
-    setMessage("");
+    setView("form");
   };
 
   const openEditForm = (event) => {
     const coverImage = getCoverImageFromEvent(event);
     const additionalImages = getAdditionalImagesFromEvent(event);
+    const eventTypes = getEventTypesFromEvent(event);
+    const seriesNames = getEventSeriesNames(event);
+    const productIds = getEventProductIds(event);
 
+    setMessage("");
     setEditingEvent(event);
 
     setForm({
-      titulo: getEventTitle(event),
+      titulo: event.titulo || event.nombre || "",
       descripcion: event.descripcion || "",
       categoriaNombre: event.categoriaNombre || "Eventos",
-      origenNombre: event.origenNombre || "Variado",
-      pais: event.pais || getCountryCodeFromOrigin(event.origenNombre || "Variado"),
-      tipoEvento: event.tipoEvento || event.tipo || "Otro",
+      origenNombre: event.origenNombre || event.pais || "Variado",
+      pais: event.pais || getCountryCodeFromOrigin(event.origenNombre || "V"),
+      tipoEvento: eventTypes.join(", ") || "Otro",
+      tiposEvento: eventTypes.length > 0 ? eventTypes : ["Otro"],
       fechaInicio: formatDateInput(event.fechaInicio),
       fechaFin: formatDateInput(event.fechaFin),
       estado: event.estado || "proximo",
       destacado: Boolean(event.destacado),
       activo: event.activo !== false,
-      seriesNombre: getEventSeriesNames(event),
-      productos: getEventProductIds(event)
+      seriesNombre: seriesNames,
+      productos: productIds
     });
 
     setCoverImages(
@@ -638,13 +785,12 @@ function AdminEventsPage() {
     );
 
     setCarouselImages(
-      additionalImages.map((image, index) =>
-        createEditableImageFromSource(image, index + 1)
-      )
+      additionalImages
+        .map((image, index) => createEditableImageFromSource(image, index))
+        .filter(Boolean)
     );
 
     setImagesTouched(false);
-    setMessage("");
     setView("form");
   };
 
@@ -662,25 +808,83 @@ function AdminEventsPage() {
     nombre: name
   });
 
-  const ensureCategoryExists = async () => {
-    const categoryName = form.categoriaNombre.trim();
+  const handleCreateEventType = async (name) => {
+    const cleanName = name?.trim();
 
-    if (!categoryName) {
-      throw new Error("Selecciona o crea una categoría para el evento.");
-    }
+    if (!cleanName) return null;
 
-    const existingOption = getOptionByName(categoryOptions, categoryName);
+    const existingType = managedEventTypes.find(
+      (eventType) => normalizeText(eventType.nombre) === normalizeText(cleanName)
+    );
 
-    if (existingOption && isMongoObjectId(existingOption.id)) {
+    if (existingType) {
+      if (existingType.activo === false) {
+        throw new Error(
+          `El tipo de evento “${existingType.nombre}” ya existe pero está inactivo. Actívalo desde Tipos de evento.`
+        );
+      }
+
       return {
-        id: existingOption.id,
-        nombre: existingOption.nombre
+        ...existingType,
+        id: getId(existingType) || existingType.nombre,
+        nombre: existingType.nombre
       };
     }
 
-    const existingCategory = activeCategories.find(
-      (category) => normalizeText(category.nombre) === normalizeText(categoryName)
-    );
+    try {
+      const data = await apiCreateEventType({
+        nombre: cleanName,
+        descripcion: "Tipo de evento creado rápidamente desde eventos.",
+        orden: 0,
+        activo: true
+      });
+
+      const createdEventType = normalizeEventTypeFromApi(
+        data.eventType || data.tipoEvento || data.data || data
+      );
+
+      const option = {
+        ...createdEventType,
+        id: getId(createdEventType) || cleanName,
+        nombre: createdEventType.nombre || cleanName,
+        activo: createdEventType.activo !== false
+      };
+
+      setManagedEventTypes((currentTypes) => {
+        const exists = currentTypes.some(
+          (item) =>
+            getId(item) === getId(option) ||
+            normalizeText(item.nombre) === normalizeText(option.nombre)
+        );
+
+        if (exists) {
+          return currentTypes.map((item) =>
+            getId(item) === getId(option) ||
+            normalizeText(item.nombre) === normalizeText(option.nombre)
+              ? {
+                  ...item,
+                  ...option,
+                  activo: option.activo !== false
+                }
+              : item
+          );
+        }
+
+        return [option, ...currentTypes];
+      });
+
+      return option;
+    } catch (error) {
+      throw new Error(
+        error.message ||
+          `No se pudo guardar “${cleanName}” en Gestión de tipos de evento.`
+      );
+    }
+  };
+
+  const ensureCategoryExists = async () => {
+    const categoryName = form.categoriaNombre.trim() || "Eventos";
+    const existingCategory = getOptionByName(categoryOptions, categoryName);
 
     if (existingCategory) {
       return {
@@ -699,34 +903,23 @@ function AdminEventsPage() {
     const createdCategory = await createCategoryFull({
       nombre: categoryName,
       descripcion: "Categoría creada rápidamente desde eventos.",
-      tipo: "principal",
+      tipo: "evento",
       orden: 0,
-      activa: true
+      activa: true,
+      activo: true
     });
 
     await refreshCategories?.();
 
     return {
       id: getId(createdCategory),
-      nombre: createdCategory.nombre || categoryName
+      nombre: getName(createdCategory, categoryName)
     };
   };
 
   const ensureOriginExists = async () => {
     const originName = form.origenNombre.trim() || "Variado";
-
-    const existingOption = getOptionByName(originOptions, originName);
-
-    if (existingOption && isMongoObjectId(existingOption.id)) {
-      return {
-        id: existingOption.id,
-        nombre: existingOption.nombre
-      };
-    }
-
-    const existingOrigin = activeOrigins.find(
-      (origin) => normalizeText(origin.nombre) === normalizeText(originName)
-    );
+    const existingOrigin = getOptionByName(originOptions, originName);
 
     if (existingOrigin) {
       return {
@@ -744,7 +937,7 @@ function AdminEventsPage() {
 
     const createdOrigin = await createOriginFull({
       nombre: originName,
-      descripcion: "País/origen creado rápidamente desde eventos.",
+      descripcion: "Origen creado rápidamente desde eventos.",
       activo: true
     });
 
@@ -752,22 +945,20 @@ function AdminEventsPage() {
 
     return {
       id: getId(createdOrigin),
-      nombre: createdOrigin.nombre || originName
+      nombre: getName(createdOrigin, originName)
     };
   };
 
-  const ensureSeriesExist = async ({ category, origin }) => {
-    const selectedNames = uniqueTexts(form.seriesNombre);
+  const ensureSeriesExist = async () => {
+    const selectedSeriesNames = uniqueTexts(form.seriesNombre);
 
-    const result = [];
+    const resolvedSeries = [];
 
-    for (const seriesName of selectedNames) {
-      const existingSeries = activeSeries.find(
-        (serie) => normalizeText(serie.nombre) === normalizeText(seriesName)
-      );
+    for (const seriesName of selectedSeriesNames) {
+      const existingSeries = getOptionByName(seriesOptions, seriesName);
 
       if (existingSeries) {
-        result.push({
+        resolvedSeries.push({
           id: getId(existingSeries),
           nombre: existingSeries.nombre
         });
@@ -776,7 +967,7 @@ function AdminEventsPage() {
       }
 
       if (!createSeriesFull) {
-        result.push({
+        resolvedSeries.push({
           id: "",
           nombre: seriesName
         });
@@ -787,13 +978,11 @@ function AdminEventsPage() {
       const createdSeries = await createSeriesFull({
         nombre: seriesName,
         descripcion: "Serie creada rápidamente desde eventos.",
-        categoriaPrincipal: category.id || "",
-        categoriaPrincipalNombre: category.nombre || "Series",
-        categoriaNombre: category.nombre || "Series",
-        origen: origin.id || "",
-        origenNombre: origin.nombre || "Variado",
-        pais: getCountryCodeFromOrigin(origin.nombre || "Variado"),
-        tipo: category.nombre || "Historia",
+        categoriaPrincipalNombre: "Series",
+        categoriaNombre: "Series",
+        origenNombre: form.origenNombre.trim() || "Variado",
+        pais: getCountryCodeFromOrigin(form.origenNombre.trim() || "Variado"),
+        tipo: "Historia",
         genero: "",
         creadoresNombre: [],
         destacada: false,
@@ -802,66 +991,64 @@ function AdminEventsPage() {
         orden: 0
       });
 
-      result.push({
+      resolvedSeries.push({
         id: getId(createdSeries),
-        nombre: createdSeries.nombre || seriesName
+        nombre: getName(createdSeries, seriesName)
       });
     }
 
-    if (result.length > 0) {
+    if (selectedSeriesNames.length > 0) {
       await refreshSeries?.();
     }
 
-    return result;
+    return resolvedSeries;
   };
 
   const buildPayload = async () => {
     const category = await ensureCategoryExists();
     const origin = await ensureOriginExists();
-    const selectedSeries = await ensureSeriesExist({
-      category,
-      origin
-    });
+    const resolvedSeries = await ensureSeriesExist();
 
-    const seriesIds = selectedSeries
+    const eventTypes = uniqueTexts(form.tiposEvento);
+    const eventTypesText = eventTypes.join(", ");
+
+    const seriesIds = resolvedSeries
       .map((serie) => serie.id)
-      .filter(isMongoObjectId);
+      .filter((id) => id && id.length > 0);
 
-    const seriesNames = selectedSeries
+    const seriesNames = resolvedSeries
       .map((serie) => serie.nombre)
       .filter(Boolean);
 
     const payload = {
       titulo: form.titulo.trim(),
       nombre: form.titulo.trim(),
-      descripcion: form.descripcion.trim(),
+      descripcion: form.descripcion,
 
-      categoria: category.id,
-      categoriaNombre: category.nombre || form.categoriaNombre.trim(),
+      categoria: category.id || "",
+      categoriaNombre: category.nombre || "Eventos",
 
-      origen: origin.id,
-      origenNombre: origin.nombre || form.origenNombre.trim(),
-      pais:
-        form.pais ||
-        getCountryCodeFromOrigin(origin.nombre || form.origenNombre || "Variado"),
+      origen: origin.id || "",
+      origenNombre: origin.nombre || "Variado",
+      pais: form.pais || getCountryCodeFromOrigin(origin.nombre || "Variado"),
 
-      tipoEvento: form.tipoEvento || "Otro",
-      tipo: form.tipoEvento || "Otro",
+      tipoEvento: eventTypesText || "Otro",
+      tiposEvento: eventTypes.length > 0 ? eventTypes : ["Otro"],
+      tipo: eventTypesText || "Otro",
 
       fechaInicio: form.fechaInicio || null,
       fechaFin: form.fechaFin || null,
 
-      estado: form.estado || "proximo",
+      estado: form.estado,
       destacado: Boolean(form.destacado),
       activo: Boolean(form.activo),
 
+      series: seriesIds,
+      seriesNombre: seriesNames,
       serie: seriesIds[0] || "",
       serieNombre: seriesNames[0] || "",
 
-      series: seriesIds,
-      seriesNombre: seriesNames,
-
-      productos: form.productos.filter(isMongoObjectId)
+      productos: form.productos
     };
 
     if (!editingEvent || imagesTouched) {
@@ -869,55 +1056,62 @@ function AdminEventsPage() {
       const preparedCarouselImages = await prepareImagesForPayload(carouselImages);
 
       payload.imagen = preparedCoverImages[0] || "";
-      payload.imagenes = preparedCarouselImages;
+      payload.imagenes = preparedCarouselImages.filter(
+        (image) => image !== payload.imagen
+      );
       payload.imagenesTouched = true;
+      payload.imagesTouched = true;
+      payload.replaceImages = true;
     }
 
     return payload;
   };
 
-  const handleSubmit = async (event) => {
-    event.preventDefault();
-
+  const validateForm = () => {
     if (!form.titulo.trim()) {
       setMessage("Escribe el título del evento.");
-      return;
-    }
-
-    if (!form.descripcion.trim()) {
-      setMessage("Escribe una descripción para el evento.");
-      return;
+      return false;
     }
 
     if (!form.categoriaNombre.trim()) {
-      setMessage("Selecciona o crea una categoría del evento.");
-      return;
+      setMessage("Selecciona o crea una categoría.");
+      return false;
     }
 
     if (!form.origenNombre.trim()) {
       setMessage("Selecciona o crea un país/origen.");
-      return;
+      return false;
     }
 
-    if (!form.tipoEvento.trim()) {
-      setMessage("Selecciona o crea un tipo de evento.");
-      return;
+    if (!Array.isArray(form.tiposEvento) || form.tiposEvento.length === 0) {
+      setMessage("Selecciona o crea al menos un tipo de evento.");
+      return false;
     }
 
     if (!editingEvent && coverImages.length === 0) {
       setMessage("Sube una portada para el evento.");
-      return;
+      return false;
     }
+
+    return true;
+  };
+
+  const handleSubmit = async (event) => {
+    event.preventDefault();
+
+    if (!validateForm()) return;
 
     setSaving(true);
 
     setMessage(
-      editingEvent
-        ? "Guardando cambios del evento..."
-        : "Creando evento..."
+      editingEvent ? "Guardando cambios del evento..." : "Creando evento..."
     );
 
     try {
+      for (const eventTypeName of form.tiposEvento) {
+        await handleCreateEventType(eventTypeName);
+      }
+
       const payload = await buildPayload();
 
       if (editingEvent) {
@@ -929,7 +1123,8 @@ function AdminEventsPage() {
       }
 
       resetForm();
-      await refreshEvents?.();
+
+      await Promise.all([refreshEvents?.(), refreshEventTypes()]);
     } catch (error) {
       setMessage(error.message || "No se pudo guardar el evento.");
     } finally {
@@ -964,6 +1159,14 @@ function AdminEventsPage() {
     }
   };
 
+  const messageToShow =
+    message ||
+    eventsLoadError ||
+    categoriesLoadError ||
+    originsLoadError ||
+    seriesLoadError ||
+    eventTypesError;
+
   return (
     <section className="space-y-6">
       <div className="rounded-[32px] bg-white p-8 smika-shadow border border-[#87CCC8]/20">
@@ -973,26 +1176,41 @@ function AdminEventsPage() {
           <div>
             <h2 className="text-4xl font-black">Gestión de eventos</h2>
 
-            <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Crea y edita eventos reales de Smika Store. Un evento puede tener
-              muchas series y muchos productos vinculados.
+            <p className="mt-3 max-w-3xl text-gray-600 leading-7">
+              Crea eventos con portada, carrusel, series vinculadas, productos
+              relacionados y múltiples tipos de evento sincronizados con MongoDB.
             </p>
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
             {view === "list" && (
-              <button
-                type="button"
-                onClick={refreshEvents}
-                disabled={loadingEvents || saving}
-                className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
-              >
-                <RefreshCw
-                  size={18}
-                  className={loadingEvents ? "animate-spin" : ""}
-                />
-                Recargar
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={refreshEventTypes}
+                  disabled={loadingEventTypes || saving}
+                  className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <RefreshCw
+                    size={18}
+                    className={loadingEventTypes ? "animate-spin" : ""}
+                  />
+                  Tipos
+                </button>
+
+                <button
+                  type="button"
+                  onClick={refreshEvents}
+                  disabled={loadingEvents || saving}
+                  className="rounded-full bg-[#F8F6F7] px-5 py-3 font-black flex items-center justify-center gap-2 disabled:opacity-60"
+                >
+                  <RefreshCw
+                    size={18}
+                    className={loadingEvents ? "animate-spin" : ""}
+                  />
+                  Recargar
+                </button>
+              </>
             )}
 
             {view === "list" ? (
@@ -1018,17 +1236,9 @@ function AdminEventsPage() {
         </div>
       </div>
 
-      {(message ||
-        eventsLoadError ||
-        categoriesLoadError ||
-        originsLoadError ||
-        seriesLoadError) && (
+      {messageToShow && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
-          {message ||
-            eventsLoadError ||
-            categoriesLoadError ||
-            originsLoadError ||
-            seriesLoadError}
+          {messageToShow}
         </div>
       )}
 
@@ -1065,33 +1275,42 @@ function AdminEventsPage() {
           <div className="mt-6 grid gap-5 lg:grid-cols-2">
             <label className="grid gap-2 text-sm font-black">
               Título del evento
-
               <input
                 name="titulo"
                 value={form.titulo}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Ejemplo: CAFE LEBOM - BLOSSOMS OF THE WHITE NIGHT"
+                placeholder="Ejemplo: Evento Lebom"
               />
             </label>
 
-            <CreatableSelect
-              label="Tipo de evento"
-              value={form.tipoEvento}
-              onChange={(value) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  tipoEvento: value
-                }))
-              }
-              onCreate={handleSimpleCreatableCreate}
-              options={eventTypeSelectOptions}
-              placeholder="Lebom, Café, Fantazit..."
-              emptyLabel="Sin tipo de evento"
-              emptyCreateLabel="Agregar tipo de evento"
-              createLabel={(name) => `Agregar “${name}” a tipo de evento`}
-              helperText="Ejemplo: Café Lebom, Fantazit u otro tipo de evento."
-            />
+            <label className="grid gap-2 text-sm font-black">
+              Estado
+              <select
+                name="estado"
+                value={form.estado}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+              >
+                {eventStatusOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2 text-sm font-black lg:col-span-2">
+              Descripción del evento
+              <textarea
+                name="descripcion"
+                value={form.descripcion}
+                onChange={handleChange}
+                rows="5"
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Escribe la descripción. Los saltos de línea se respetan en la página pública."
+              />
+            </label>
 
             <CreatableSelect
               label="Categoría del evento"
@@ -1108,11 +1327,11 @@ function AdminEventsPage() {
               emptyLabel="Sin categoría"
               emptyCreateLabel="Agregar categoría"
               createLabel={(name) => `Agregar “${name}” a categorías`}
-              helperText="Si la categoría no existe, se creará al guardar el evento."
+              helperText="Si no existe, se creará al guardar el evento."
             />
 
             <CreatableSelect
-              label="Origen / País"
+              label="País / origen"
               value={form.origenNombre}
               onChange={(value) =>
                 setForm((currentForm) => ({
@@ -1125,17 +1344,39 @@ function AdminEventsPage() {
               options={originOptions}
               placeholder="China, Corea, Japón, Variado..."
               emptyLabel="Sin origen"
-              emptyCreateLabel="Agregar país/origen"
+              emptyCreateLabel="Agregar origen"
               createLabel={(name) => `Agregar “${name}” a países/orígenes`}
-              helperText="Si el país/origen no existe, se creará al guardar el evento."
+              helperText="Si no existe, se creará al guardar el evento."
             />
 
-            <label className="grid gap-2 text-sm font-black">
-              Fecha inicio
+            <div className="lg:col-span-2">
+              <MultiCreatableSelect
+                label="Tipos de evento"
+                values={form.tiposEvento}
+                onChange={(values) => {
+                  const cleanValues = uniqueTexts(values);
 
+                  setForm((currentForm) => ({
+                    ...currentForm,
+                    tiposEvento: cleanValues,
+                    tipoEvento: cleanValues.join(", ")
+                  }));
+                }}
+                onCreate={handleCreateEventType}
+                options={eventTypeOptions}
+                placeholder="Lebom, Café, Fantazit, preventa..."
+                emptyLabel="Sin tipos de evento"
+                emptyCreateLabel="Agregar tipo de evento"
+                createLabel={(name) => `Agregar “${name}” a tipo de evento`}
+                helperText="Un evento puede tener uno o más tipos. Si escribes uno nuevo, se guarda también en Gestión de tipos de evento."
+              />
+            </div>
+
+            <label className="grid gap-2 text-sm font-black">
+              Fecha de inicio
               <input
-                type="date"
                 name="fechaInicio"
+                type="date"
                 value={form.fechaInicio}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
@@ -1143,38 +1384,19 @@ function AdminEventsPage() {
             </label>
 
             <label className="grid gap-2 text-sm font-black">
-              Fecha fin
-
+              Fecha de cierre
               <input
-                type="date"
                 name="fechaFin"
+                type="date"
                 value={form.fechaFin}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
               />
             </label>
 
-            <label className="grid gap-2 text-sm font-black">
-              Estado
-
-              <select
-                name="estado"
-                value={form.estado}
-                onChange={handleChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-              >
-                {eventStatusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4">
+            <div className="rounded-3xl bg-[#F8F6F7] p-4 lg:col-span-2">
               <label className="flex items-center justify-between gap-4 text-sm font-black">
                 Evento destacado
-
                 <input
                   type="checkbox"
                   name="destacado"
@@ -1184,9 +1406,8 @@ function AdminEventsPage() {
                 />
               </label>
 
-              <label className="flex items-center justify-between gap-4 text-sm font-black">
+              <label className="mt-4 flex items-center justify-between gap-4 text-sm font-black">
                 Evento activo
-
                 <input
                   type="checkbox"
                   name="activo"
@@ -1197,19 +1418,6 @@ function AdminEventsPage() {
               </label>
             </div>
 
-            <label className="grid gap-2 text-sm font-black lg:col-span-2">
-              Descripción del evento
-
-              <textarea
-                name="descripcion"
-                value={form.descripcion}
-                onChange={handleChange}
-                rows="4"
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Describe el evento, condiciones, productos vinculados o detalle para la página pública."
-              />
-            </label>
-
             <div className="lg:col-span-2">
               <MultiCreatableSelect
                 label="Series / historias vinculadas"
@@ -1217,7 +1425,7 @@ function AdminEventsPage() {
                 onChange={(values) =>
                   setForm((currentForm) => ({
                     ...currentForm,
-                    seriesNombre: values
+                    seriesNombre: uniqueTexts(values)
                   }))
                 }
                 onCreate={handleSimpleCreatableCreate}
@@ -1399,7 +1607,7 @@ function AdminEventsPage() {
                       <div className="mt-3 grid gap-2 text-sm text-gray-600">
                         <p>
                           <strong>Tipo:</strong>{" "}
-                          {event.tipoEvento || event.tipo || "Otro"}
+                          {getEventTypesFromEvent(event).join(", ") || "Otro"}
                         </p>
 
                         <p>

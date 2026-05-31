@@ -35,6 +35,12 @@ const adminNavigation = [
     priorityGroup: "principal"
   },
   {
+    label: "Tipos de evento",
+    path: "/admin/tipos-evento",
+    icon: Tags,
+    priorityGroup: "principal"
+  },
+  {
     label: "Series / Historias",
     path: "/admin/series",
     icon: Sparkles,
