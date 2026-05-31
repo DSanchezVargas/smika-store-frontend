@@ -12,22 +12,25 @@ import {
 } from "lucide-react";
 
 import ImageDropzone from "../../components/admin/ImageDropzone";
+import CreatableSelect from "../../components/admin/CreatableSelect";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 import { useAdminData } from "../../context/AdminDataContext";
 
 const initialForm = {
   nombre: "",
-  categoriaId: "",
   categoriaNombre: "",
-  serie: "",
-  evento: "",
-  tipo: "",
+  serieNombre: "",
+  eventoNombre: "",
+  origenNombre: "",
+  tipoProducto: "",
   personajesNombre: [],
   material: "",
   precio: "",
   stock: "",
   tamano: "",
+  disponibilidad: "stock",
   estado: "Activo",
+  tiempoEstimado: "",
   adulto: false,
   esNuevo: true,
   esDestacado: false
@@ -35,14 +38,21 @@ const initialForm = {
 
 const productTypes = [
   "Stand de acrílico",
-  "Pin",
+  "Llavero",
   "Photocard",
+  "Pin",
+  "Sticker",
+  "Print",
   "Tomo",
   "Merch",
-  "Pack",
-  "Llavero",
-  "Sticker",
-  "Print"
+  "Pack"
+];
+
+const disponibilidadOptions = [
+  { id: "stock", nombre: "En stock", value: "stock", estado: "Activo" },
+  { id: "preventa", nombre: "Preventa", value: "preventa", estado: "Preventa" },
+  { id: "por_pedido", nombre: "Por pedido", value: "por_pedido", estado: "Por pedido" },
+  { id: "agotado", nombre: "Agotado", value: "agotado", estado: "Agotado" }
 ];
 
 function normalizeText(text = "") {
@@ -54,48 +64,67 @@ function normalizeText(text = "") {
     .trim();
 }
 
+function getId(item) {
+  return item?._id || item?.id || "";
+}
+
 function getProductId(product) {
   return product?._id || product?.id || "";
 }
 
 function getProductPrice(product) {
   return Number(
-    product?.precioReferencial || product?.precio || product?.price || 0
+    product?.precioReferencial ?? product?.precio ?? product?.price ?? 0
   );
 }
 
+function getRelatedName(value, ...fallbacks) {
+  if (value && typeof value === "object") {
+    return value.nombre || value.titulo || value.name || "";
+  }
+
+  const found = [value, ...fallbacks].find(
+    (item) => item !== undefined && item !== null && item !== ""
+  );
+
+  return found ? found.toString().trim() : "";
+}
+
 function getProductType(product) {
-  return product?.tipoProducto || product?.tipo || product?.type || "";
+  return getRelatedName(product?.tipoProducto, product?.tipo, product?.type);
 }
 
-function getProductSerie(product) {
-  if (product?.serie && typeof product.serie === "object") {
-    return product.serie.nombre || "";
-  }
-
-  return product?.serieNombre || product?.serie || "";
+function getProductCategoryName(product) {
+  return getRelatedName(
+    product?.categoria,
+    product?.categoriaNombre,
+    product?.category
+  );
 }
 
-function getProductEvento(product) {
-  if (product?.evento && typeof product.evento === "object") {
-    return product.evento.titulo || product.evento.nombre || "";
-  }
-
-  return product?.eventoNombre || product?.evento || "";
+function getProductSeriesName(product) {
+  return getRelatedName(
+    product?.serie,
+    product?.serieNombre,
+    product?.series
+  );
 }
 
-function getProductCategory(product) {
-  if (product?.categoria && typeof product.categoria === "object") {
-    return {
-      id: product.categoria._id || product.categoria.id || "",
-      nombre: product.categoria.nombre || ""
-    };
-  }
+function getProductEventName(product) {
+  return getRelatedName(
+    product?.evento,
+    product?.eventoNombre,
+    product?.event
+  );
+}
 
-  return {
-    id: product?.categoriaId || "",
-    nombre: product?.categoriaNombre || product?.categoria || ""
-  };
+function getProductOriginName(product) {
+  return getRelatedName(
+    product?.origen,
+    product?.origenNombre,
+    product?.pais,
+    "Variado"
+  );
 }
 
 function getImageSource(image) {
@@ -145,6 +174,7 @@ async function imageToPersistedSource(image) {
     const dataUrl = await fileToDataUrl(file);
 
     return {
+      id: image.id,
       url: dataUrl,
       preview: dataUrl,
       finalPreview: dataUrl,
@@ -154,8 +184,8 @@ async function imageToPersistedSource(image) {
       finalSize: Number(image.finalSize || image.size || 0),
       width: Number(image.width || 0),
       height: Number(image.height || 0),
-      finalWidth: Number(image.finalWidth || 0),
-      finalHeight: Number(image.finalHeight || 0),
+      finalWidth: Number(image.finalWidth || image.width || 0),
+      finalHeight: Number(image.finalHeight || image.height || 0),
       crop: image.crop || {
         x: 0,
         y: 0,
@@ -167,6 +197,9 @@ async function imageToPersistedSource(image) {
         x: 0,
         y: 0
       },
+      finalQuality: image.finalQuality || image.compressionQuality || 0.92,
+      finalType: image.finalType || "image/jpeg",
+      finalCompressed: true,
       storage: "local-data-url"
     };
   }
@@ -183,7 +216,7 @@ async function imageToPersistedSource(image) {
       finalPreview: image.finalPreview || source,
       storage:
         image.storage ||
-        (source.startsWith("data:") ? "local-data-url" : "existing")
+        (source.startsWith("data:") ? "local-data-url" : "external")
     };
   }
 
@@ -191,7 +224,7 @@ async function imageToPersistedSource(image) {
     url: source,
     preview: source,
     finalPreview: source,
-    storage: source.startsWith("data:") ? "local-data-url" : "existing"
+    storage: source.startsWith("data:") ? "local-data-url" : "external"
   };
 }
 
@@ -199,40 +232,6 @@ async function prepareImagesForPayload(images = []) {
   const preparedImages = await Promise.all(images.map(imageToPersistedSource));
 
   return preparedImages.filter(Boolean);
-}
-
-function normalizePersonajesFromProduct(product) {
-  if (Array.isArray(product?.personajesNombre)) {
-    return product.personajesNombre.filter(Boolean);
-  }
-
-  if (Array.isArray(product?.personajes)) {
-    return product.personajes
-      .map((personaje) => {
-        if (typeof personaje === "object" && personaje !== null) {
-          return personaje.nombre || personaje.name || "";
-        }
-
-        return "";
-      })
-      .filter(Boolean);
-  }
-
-  if (product?.personajeNombre) {
-    return product.personajeNombre
-      .split(",")
-      .map((name) => name.trim())
-      .filter(Boolean);
-  }
-
-  if (product?.personaje) {
-    return product.personaje
-      .split(",")
-      .map((name) => name.trim())
-      .filter(Boolean);
-  }
-
-  return [];
 }
 
 function createEditableImageFromProduct(image, index = 0) {
@@ -246,7 +245,7 @@ function createEditableImageFromProduct(image, index = 0) {
     originalName: image?.originalName || image?.name || "",
     preview: image?.preview || source,
     finalPreview: image?.finalPreview || source,
-    url: source,
+    url: image?.url || source,
     size: Number(image?.size || 0),
     originalSize: Number(image?.originalSize || image?.size || 0),
     compressedSize: Number(image?.compressedSize || image?.size || 0),
@@ -269,8 +268,54 @@ function createEditableImageFromProduct(image, index = 0) {
     finalQuality: image?.finalQuality || 0.92,
     finalType: image?.finalType || "image/jpeg",
     finalCompressed: image?.finalCompressed !== false,
-    storage: image?.storage || "existing"
+    storage: image?.storage || "external"
   };
+}
+
+function getOptionByName(options = [], name = "") {
+  return options.find(
+    (option) => normalizeText(option.nombre) === normalizeText(name)
+  );
+}
+
+function buildOption(item) {
+  if (typeof item === "string") {
+    return {
+      id: item,
+      nombre: item
+    };
+  }
+
+  return {
+    ...item,
+    id: getId(item) || item.nombre,
+    nombre: item.nombre || item.titulo || item.name || "Sin nombre"
+  };
+}
+
+function normalizePersonajesFromProduct(product) {
+  if (Array.isArray(product?.personajesNombre)) {
+    return product.personajesNombre.filter(Boolean);
+  }
+
+  if (Array.isArray(product?.personajes)) {
+    return product.personajes
+      .map((personaje) => {
+        if (typeof personaje === "object" && personaje !== null) {
+          return personaje.nombre || personaje.name || "";
+        }
+
+        return "";
+      })
+      .filter(Boolean);
+  }
+
+  const personajeTexto = product?.personajeNombre || product?.personaje || "";
+
+  return personajeTexto
+    .split(",")
+    .map((name) => name.trim())
+    .filter(Boolean);
 }
 
 function MultiTextInput({
@@ -335,7 +380,7 @@ function MultiTextInput({
 
       {availableOptions.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-2">
-          {availableOptions.slice(0, 8).map((option) => (
+          {availableOptions.slice(0, 10).map((option) => (
             <button
               key={option}
               type="button"
@@ -384,17 +429,21 @@ function AdminProductsPage() {
     series,
     characters,
     categories,
+    origins,
     storageError,
     productLoadError,
     categoriesLoadError,
+    originsLoadError,
     loadingProducts,
     createProduct,
     updateProduct,
     toggleProductStatus,
     createCharacterQuick,
     createCategoryFull,
+    createOriginFull,
     refreshProducts,
-    refreshCategories
+    refreshCategories,
+    refreshOrigins
   } = useAdminData();
 
   const [view, setView] = useState("list");
@@ -412,25 +461,44 @@ function AdminProductsPage() {
     });
   }, [products]);
 
-  const activeCategories = useMemo(() => {
+  const categoryOptions = useMemo(() => {
     return (categories || [])
       .filter((category) => category.activa !== false && category.activo !== false)
+      .map(buildOption)
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [categories]);
 
-  const activeSeriesNames = useMemo(() => {
+  const seriesOptions = useMemo(() => {
     return (series || [])
-      .filter((serie) => serie.activo !== false)
-      .map((serie) => serie.nombre)
-      .filter(Boolean);
+      .filter((serie) => serie.activa !== false && serie.activo !== false)
+      .map(buildOption)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [series]);
 
-  const activeEventNames = useMemo(() => {
+  const eventOptions = useMemo(() => {
     return (events || [])
       .filter((event) => event.activo !== false)
-      .map((event) => event.titulo || event.nombre)
-      .filter(Boolean);
+      .map((event) => ({
+        ...event,
+        id: getId(event) || event.titulo || event.nombre,
+        nombre: event.titulo || event.nombre || "Evento"
+      }))
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [events]);
+
+  const originOptions = useMemo(() => {
+    return (origins || [])
+      .filter((origin) => origin.activo !== false)
+      .map(buildOption)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [origins]);
+
+  const typeOptions = useMemo(() => {
+    return productTypes.map((type) => ({
+      id: type,
+      nombre: type
+    }));
+  }, []);
 
   const characterOptions = useMemo(() => {
     return (characters || [])
@@ -438,6 +506,10 @@ function AdminProductsPage() {
       .map((character) => character.nombre)
       .filter(Boolean);
   }, [characters]);
+
+  const selectedAvailability = disponibilidadOptions.find(
+    (option) => option.value === form.disponibilidad
+  );
 
   const setImagesAndTouch = (updater) => {
     setImagesTouched(true);
@@ -464,23 +536,24 @@ function AdminProductsPage() {
   };
 
   const openEditForm = (product) => {
-    const category = getProductCategory(product);
-
     setMessage("");
     setEditingProduct(product);
+
     setForm({
       nombre: product.nombre || "",
-      categoriaId: category.id || "",
-      categoriaNombre: category.nombre || "",
-      serie: getProductSerie(product),
-      evento: getProductEvento(product),
-      tipo: getProductType(product),
+      categoriaNombre: getProductCategoryName(product),
+      serieNombre: getProductSeriesName(product),
+      eventoNombre: getProductEventName(product),
+      origenNombre: getProductOriginName(product),
+      tipoProducto: getProductType(product),
       personajesNombre: normalizePersonajesFromProduct(product),
       material: product.material || "",
       precio: getProductPrice(product),
-      stock: Number(product.stock || 0),
+      stock: product.stock !== undefined ? Number(product.stock || 0) : "",
       tamano: product.tamano || "",
+      disponibilidad: product.disponibilidad || "stock",
       estado: product.estado || "Activo",
+      tiempoEstimado: product.tiempoEstimado || "",
       adulto: Boolean(product.adulto),
       esNuevo: product.esNuevo !== undefined ? Boolean(product.esNuevo) : true,
       esDestacado: Boolean(product.esDestacado)
@@ -507,40 +580,31 @@ function AdminProductsPage() {
     }));
   };
 
-  const handleCategoryChange = (event) => {
-    const categoryId = event.target.value;
-    const selectedCategory = activeCategories.find(
-      (category) => (category._id || category.id) === categoryId
-    );
+  const handleAvailabilityChange = (value) => {
+    const option = disponibilidadOptions.find((item) => item.nombre === value);
+
+    if (!option) return;
 
     setForm((currentForm) => ({
       ...currentForm,
-      categoriaId,
-      categoriaNombre: selectedCategory?.nombre || ""
+      disponibilidad: option.value,
+      estado: option.estado
     }));
   };
 
+  const handleSimpleCreatableCreate = (name) => ({
+    id: `temp-${Date.now()}-${name}`,
+    nombre: name
+  });
+
   const ensureCategoryExists = async () => {
-    if (form.categoriaId) {
-      const selectedCategory = activeCategories.find(
-        (category) => (category._id || category.id) === form.categoriaId
-      );
-
-      return {
-        id: form.categoriaId,
-        nombre: selectedCategory?.nombre || form.categoriaNombre
-      };
-    }
-
     const categoryName = form.categoriaNombre.trim();
 
     if (!categoryName) {
       throw new Error("Selecciona o crea una categoría real.");
     }
 
-    const existingCategory = activeCategories.find(
-      (category) => normalizeText(category.nombre) === normalizeText(categoryName)
-    );
+    const existingCategory = getOptionByName(categoryOptions, categoryName);
 
     if (existingCategory) {
       return {
@@ -565,8 +629,44 @@ function AdminProductsPage() {
     };
   };
 
+  const ensureOriginExists = async () => {
+    const originName = form.origenNombre.trim() || "Variado";
+    const existingOrigin = getOptionByName(originOptions, originName);
+
+    if (existingOrigin) {
+      return {
+        id: existingOrigin._id || existingOrigin.id,
+        nombre: existingOrigin.nombre
+      };
+    }
+
+    if (!createOriginFull) {
+      return {
+        id: "",
+        nombre: originName
+      };
+    }
+
+    const createdOrigin = await createOriginFull({
+      nombre: originName,
+      descripcion: "Origen creado rápidamente desde productos.",
+      activo: true
+    });
+
+    await refreshOrigins?.();
+
+    return {
+      id: createdOrigin._id || createdOrigin.id,
+      nombre: createdOrigin.nombre
+    };
+  };
+
   const buildPayload = async () => {
     const category = await ensureCategoryExists();
+    const origin = await ensureOriginExists();
+
+    const selectedSerie = getOptionByName(seriesOptions, form.serieNombre);
+    const selectedEvent = getOptionByName(eventOptions, form.eventoNombre);
 
     const payload = {
       nombre: form.nombre.trim(),
@@ -575,14 +675,20 @@ function AdminProductsPage() {
       categoria: category.id,
       categoriaNombre: category.nombre,
 
-      serie: form.serie.trim(),
-      serieNombre: form.serie.trim(),
+      serieId: selectedSerie ? selectedSerie._id || selectedSerie.id : "",
+      serie: selectedSerie ? selectedSerie._id || selectedSerie.id : form.serieNombre.trim(),
+      serieNombre: form.serieNombre.trim(),
 
-      evento: form.evento.trim(),
-      eventoNombre: form.evento.trim(),
+      eventoId: selectedEvent ? selectedEvent._id || selectedEvent.id : "",
+      evento: selectedEvent ? selectedEvent._id || selectedEvent.id : form.eventoNombre.trim(),
+      eventoNombre: form.eventoNombre.trim(),
 
-      tipo: form.tipo.trim(),
-      tipoProducto: form.tipo.trim(),
+      origen: origin.id || form.origenNombre.trim(),
+      origenNombre: origin.nombre,
+      pais: origin.nombre,
+
+      tipo: form.tipoProducto.trim(),
+      tipoProducto: form.tipoProducto.trim(),
 
       personajesNombre: form.personajesNombre,
       personajeNombre: form.personajesNombre.join(", "),
@@ -590,9 +696,12 @@ function AdminProductsPage() {
       material: form.material.trim(),
       precio: Number(form.precio || 0),
       precioReferencial: Number(form.precio || 0),
+      price: Number(form.precio || 0),
       stock: Number(form.stock || 0),
       tamano: form.tamano.trim(),
+      disponibilidad: form.disponibilidad,
       estado: form.estado,
+      tiempoEstimado: form.tiempoEstimado.trim(),
       adulto: Boolean(form.adulto),
       esNuevo: Boolean(form.esNuevo),
       esDestacado: Boolean(form.esDestacado),
@@ -615,12 +724,12 @@ function AdminProductsPage() {
       return;
     }
 
-    if (!form.categoriaId && !form.categoriaNombre.trim()) {
+    if (!form.categoriaNombre.trim()) {
       setMessage("Selecciona o crea una categoría.");
       return;
     }
 
-    if (!form.tipo.trim()) {
+    if (!form.tipoProducto.trim()) {
       setMessage("Escribe o selecciona el tipo de producto.");
       return;
     }
@@ -651,7 +760,7 @@ function AdminProductsPage() {
       for (const characterName of form.personajesNombre) {
         await createCharacterQuick({
           name: characterName,
-          serie: form.serie
+          serie: form.serieNombre
         });
       }
 
@@ -713,9 +822,9 @@ function AdminProductsPage() {
             <h2 className="text-4xl font-black">Gestión de productos</h2>
 
             <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-              Crea productos usando categorías reales desde MongoDB. Si editas
-              nombre, precio, stock, evento o serie, las imágenes no se
-              modifican salvo que vuelvas a tocar la zona de imágenes.
+              Crea y edita productos sin romper imágenes existentes. Si solo
+              cambias evento, serie, categoría, precio, stock u origen, las
+              imágenes se conservan tal como estaban.
             </p>
           </div>
 
@@ -758,9 +867,9 @@ function AdminProductsPage() {
         </div>
       </div>
 
-      {(message || storageError || productLoadError || categoriesLoadError) && (
+      {(message || storageError || productLoadError || categoriesLoadError || originsLoadError) && (
         <div className="rounded-[24px] bg-[#F7D9D8] px-5 py-4 text-sm font-black">
-          {message || storageError || productLoadError || categoriesLoadError}
+          {message || storageError || productLoadError || categoriesLoadError || originsLoadError}
         </div>
       )}
 
@@ -808,96 +917,92 @@ function AdminProductsPage() {
               />
             </label>
 
-            <label className="grid gap-2 text-sm font-black">
-              Categoría real
-              <select
-                value={form.categoriaId}
-                onChange={handleCategoryChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-              >
-                <option value="">Seleccionar categoría existente</option>
+            <CreatableSelect
+              label="Categoría"
+              value={form.categoriaNombre}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  categoriaNombre: value
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={categoryOptions}
+              placeholder="Buscar o escribir categoría"
+              emptyLabel="Sin categoría"
+              emptyCreateLabel="Agregar categoría"
+              createLabel={(name) => `Agregar categoría “${name}”`}
+              helperText="Si no existe, se creará y se guardará en MongoDB al guardar el producto."
+            />
 
-                {activeCategories.map((category) => (
-                  <option
-                    key={category._id || category.id}
-                    value={category._id || category.id}
-                  >
-                    {category.nombre}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <CreatableSelect
+              label="Serie / Historia"
+              value={form.serieNombre}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  serieNombre: value
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={seriesOptions}
+              placeholder="Buscar o escribir serie"
+              emptyLabel="Sin serie"
+              emptyCreateLabel="Agregar serie como texto"
+              createLabel={(name) => `Usar serie “${name}”`}
+            />
 
-            <label className="grid gap-2 text-sm font-black lg:col-span-2">
-              Crear categoría si no existe
-              <input
-                name="categoriaNombre"
-                value={form.categoriaNombre}
-                onChange={(event) =>
-                  setForm((currentForm) => ({
-                    ...currentForm,
-                    categoriaId: "",
-                    categoriaNombre: event.target.value
-                  }))
-                }
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Escribe una categoría nueva si no está en la lista"
-              />
-            </label>
+            <CreatableSelect
+              label="Evento"
+              value={form.eventoNombre}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  eventoNombre: value
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={eventOptions}
+              placeholder="Buscar o escribir evento"
+              emptyLabel="Sin evento"
+              emptyCreateLabel="Agregar evento como texto"
+              createLabel={(name) => `Usar evento “${name}”`}
+            />
 
-            <label className="grid gap-2 text-sm font-black">
-              Serie
-              <input
-                name="serie"
-                list="series-options"
-                value={form.serie}
-                onChange={handleChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Buscar o escribir serie"
-              />
+            <CreatableSelect
+              label="Origen / País"
+              value={form.origenNombre}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  origenNombre: value
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={originOptions}
+              placeholder="China, Corea, Japón, Variado..."
+              emptyLabel="Sin origen"
+              emptyCreateLabel="Agregar origen"
+              createLabel={(name) => `Agregar origen “${name}”`}
+              helperText="Si no existe, se creará y quedará guardado en MongoDB."
+            />
 
-              <datalist id="series-options">
-                {activeSeriesNames.map((serie) => (
-                  <option key={serie} value={serie} />
-                ))}
-              </datalist>
-            </label>
-
-            <label className="grid gap-2 text-sm font-black">
-              Evento
-              <input
-                name="evento"
-                list="events-options"
-                value={form.evento}
-                onChange={handleChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Buscar o escribir evento"
-              />
-
-              <datalist id="events-options">
-                {activeEventNames.map((eventName) => (
-                  <option key={eventName} value={eventName} />
-                ))}
-              </datalist>
-            </label>
-
-            <label className="grid gap-2 text-sm font-black">
-              Tipo de producto
-              <input
-                name="tipo"
-                list="product-types"
-                value={form.tipo}
-                onChange={handleChange}
-                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                placeholder="Stand, llavero, photocard..."
-              />
-
-              <datalist id="product-types">
-                {productTypes.map((type) => (
-                  <option key={type} value={type} />
-                ))}
-              </datalist>
-            </label>
+            <CreatableSelect
+              label="Tipo de producto"
+              value={form.tipoProducto}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  tipoProducto: value
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={typeOptions}
+              placeholder="Stand, llavero, photocard..."
+              emptyLabel="Sin tipo"
+              emptyCreateLabel="Agregar tipo"
+              createLabel={(name) => `Usar tipo “${name}”`}
+            />
 
             <label className="grid gap-2 text-sm font-black">
               Material
@@ -924,7 +1029,7 @@ function AdminProductsPage() {
             </label>
 
             <label className="grid gap-2 text-sm font-black">
-              Stock
+              Stock numérico
               <input
                 name="stock"
                 type="number"
@@ -932,6 +1037,28 @@ function AdminProductsPage() {
                 value={form.stock}
                 onChange={handleChange}
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Ejemplo: 10"
+              />
+            </label>
+
+            <CreatableSelect
+              label="Disponibilidad"
+              value={selectedAvailability?.nombre || "En stock"}
+              onChange={handleAvailabilityChange}
+              options={disponibilidadOptions}
+              placeholder="Seleccionar disponibilidad"
+              emptyLabel="En stock"
+              disabled={false}
+            />
+
+            <label className="grid gap-2 text-sm font-black">
+              Mensaje de disponibilidad / tiempo estimado
+              <input
+                name="tiempoEstimado"
+                value={form.tiempoEstimado}
+                onChange={handleChange}
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                placeholder="Ejemplo: Llega en 15 días, disponible por pedido..."
               />
             </label>
 
@@ -947,7 +1074,7 @@ function AdminProductsPage() {
             </label>
 
             <label className="grid gap-2 text-sm font-black">
-              Estado
+              Estado interno
               <select
                 name="estado"
                 value={form.estado}
@@ -962,7 +1089,7 @@ function AdminProductsPage() {
               </select>
             </label>
 
-            <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4">
+            <div className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4 lg:col-span-2">
               <label className="flex items-center justify-between gap-4 text-sm font-black">
                 Producto nuevo
                 <input
@@ -1020,8 +1147,9 @@ function AdminProductsPage() {
               <p className="font-black">Imágenes del producto</p>
 
               <p className="mt-1 text-sm text-gray-600 leading-6">
-                Si editas el producto y no tocas esta zona, las imágenes
-                guardadas no se envían otra vez ni se modifican.
+                Si editas y no tocas esta zona, las imágenes guardadas no se
+                envían otra vez ni se modifican. Si agregas una nueva, se
+                conservan las anteriores y se agrega la nueva.
               </p>
 
               <div className="mt-4">
@@ -1085,7 +1213,6 @@ function AdminProductsPage() {
           ) : (
             <div className="grid gap-6 xl:grid-cols-3">
               {sortedProducts.map((product) => {
-                const category = getProductCategory(product);
                 const firstImage = Array.isArray(product.imagenes)
                   ? product.imagenes[0]
                   : null;
@@ -1097,11 +1224,11 @@ function AdminProductsPage() {
                   >
                     <div className="h-44 bg-[#F8F6F7]">
                       {firstImage ? (
-                        <img
-                          src={getImageSource(firstImage)}
+                        <CroppedImagePreview
+                          image={firstImage}
                           alt={product.nombre}
-                          className="h-full w-full object-contain"
-                          loading="lazy"
+                          className="h-full w-full"
+                          rounded="rounded-none"
                         />
                       ) : (
                         <div className="h-full flex items-center justify-center text-gray-400">
@@ -1128,7 +1255,7 @@ function AdminProductsPage() {
                       <div className="mt-3 grid gap-2 text-sm text-gray-600">
                         <p>
                           <strong>Categoría:</strong>{" "}
-                          {category.nombre || "Sin categoría"}
+                          {getProductCategoryName(product) || "Sin categoría"}
                         </p>
 
                         <p>
@@ -1138,12 +1265,17 @@ function AdminProductsPage() {
 
                         <p>
                           <strong>Serie:</strong>{" "}
-                          {getProductSerie(product) || "Sin serie"}
+                          {getProductSeriesName(product) || "Sin serie"}
                         </p>
 
                         <p>
                           <strong>Evento:</strong>{" "}
-                          {getProductEvento(product) || "Sin evento"}
+                          {getProductEventName(product) || "Sin evento"}
+                        </p>
+
+                        <p>
+                          <strong>Origen:</strong>{" "}
+                          {getProductOriginName(product) || "Sin origen"}
                         </p>
 
                         <p>
@@ -1153,6 +1285,13 @@ function AdminProductsPage() {
                         <p>
                           <strong>Stock:</strong> {product.stock || 0}
                         </p>
+
+                        {product.tiempoEstimado && (
+                          <p>
+                            <strong>Disponibilidad:</strong>{" "}
+                            {product.tiempoEstimado}
+                          </p>
+                        )}
 
                         <p>
                           <strong>Imágenes:</strong>{" "}
