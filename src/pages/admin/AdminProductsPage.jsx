@@ -82,6 +82,17 @@ const disponibilidadOptions = [
   }
 ];
 
+function createSlug(text = "") {
+  return text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
 function normalizeText(text = "") {
   return text
     .toString()
@@ -89,6 +100,96 @@ function normalizeText(text = "") {
     .replace(/[\u0300-\u036f]/g, "")
     .toLowerCase()
     .trim();
+}
+
+function normalizeAvailabilityOption(option) {
+  if (!option) return null;
+
+  if (typeof option === "string") {
+    const cleanName = option.trim();
+
+    if (!cleanName) return null;
+
+    return {
+      id: createSlug(cleanName) || cleanName,
+      nombre: cleanName,
+      value: cleanName,
+      estado: cleanName,
+      custom: true
+    };
+  }
+
+  const nombre = option.nombre || option.label || option.name || option.value || "";
+
+  if (!nombre.toString().trim()) return null;
+
+  return {
+    ...option,
+    id: option.id || option.value || createSlug(nombre) || nombre,
+    nombre: nombre.toString().trim(),
+    value: option.value || nombre.toString().trim(),
+    estado: option.estado || nombre.toString().trim(),
+    custom: Boolean(option.custom)
+  };
+}
+
+function availabilityOptionMatches(option, value = "") {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue) return false;
+
+  return [option?.nombre, option?.value, option?.estado, option?.id].some(
+    (item) => normalizeText(item || "") === normalizedValue
+  );
+}
+
+function findAvailabilityOption(options = [], value = "") {
+  return options.find((option) => availabilityOptionMatches(option, value));
+}
+
+function createAvailabilityOption(name = "") {
+  const cleanName = name.trim();
+
+  if (!cleanName) return null;
+
+  const existingBaseOption = findAvailabilityOption(
+    disponibilidadOptions,
+    cleanName
+  );
+
+  if (existingBaseOption) return existingBaseOption;
+
+  const slug = createSlug(cleanName) || cleanName;
+
+  return {
+    id: slug,
+    nombre: cleanName,
+    value: cleanName,
+    estado: cleanName,
+    custom: true
+  };
+}
+
+function mergeAvailabilityOptions(options = []) {
+  return options.reduce((accumulator, option) => {
+    const normalizedOption = normalizeAvailabilityOption(option);
+
+    if (!normalizedOption) return accumulator;
+
+    const exists = accumulator.some((item) => {
+      return (
+        availabilityOptionMatches(item, normalizedOption.nombre) ||
+        availabilityOptionMatches(item, normalizedOption.value) ||
+        availabilityOptionMatches(item, normalizedOption.estado)
+      );
+    });
+
+    if (!exists) {
+      accumulator.push(normalizedOption);
+    }
+
+    return accumulator;
+  }, []);
 }
 
 function getId(item) {
@@ -568,9 +669,21 @@ function AdminProductsPage() {
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [characters, form.serieNombre]);
 
-  const selectedAvailability = disponibilidadOptions.find(
-    (option) => option.value === form.disponibilidad
-  );
+  const availabilityOptions = useMemo(() => {
+    const availabilityFromProducts = (products || [])
+      .map((product) => product?.disponibilidad)
+      .filter(Boolean);
+
+    return mergeAvailabilityOptions([
+      ...disponibilidadOptions,
+      ...availabilityFromProducts
+    ]);
+  }, [products]);
+
+  const selectedAvailability =
+    findAvailabilityOption(availabilityOptions, form.disponibilidad) ||
+    createAvailabilityOption(form.disponibilidad) ||
+    disponibilidadOptions[0];
 
   const refreshProductTypes = async () => {
     setLoadingProductTypes(true);
@@ -690,7 +803,9 @@ function AdminProductsPage() {
   };
 
   const handleAvailabilityChange = (value) => {
-    const option = disponibilidadOptions.find((item) => item.nombre === value);
+    const option =
+      findAvailabilityOption(availabilityOptions, value) ||
+      createAvailabilityOption(value);
 
     if (!option) return;
 
@@ -699,6 +814,31 @@ function AdminProductsPage() {
       disponibilidad: option.value,
       estado: option.estado
     }));
+  };
+
+  const handleCreateAvailability = (name) => {
+    const cleanName = name.trim();
+
+    if (!cleanName) return null;
+
+    const existingOption = findAvailabilityOption(
+      availabilityOptions,
+      cleanName
+    );
+
+    if (existingOption) return existingOption;
+
+    return createAvailabilityOption(cleanName);
+  };
+
+  const handleAvailabilityCreateLabel = (name) => {
+    const existingOption = findAvailabilityOption(availabilityOptions, name);
+
+    if (existingOption) {
+      return `Usar “${existingOption.nombre}” existente`;
+    }
+
+    return `Agregar “${name}” a disponibilidad`;
   };
 
   const handleSimpleCreatableCreate = (name) => ({
@@ -1393,9 +1533,13 @@ function AdminProductsPage() {
               label="Disponibilidad"
               value={selectedAvailability?.nombre || "En stock"}
               onChange={handleAvailabilityChange}
-              options={disponibilidadOptions}
-              placeholder="Seleccionar disponibilidad"
+              onCreate={handleCreateAvailability}
+              options={availabilityOptions}
+              placeholder="Seleccionar o escribir disponibilidad"
               emptyLabel="En stock"
+              emptyCreateLabel="Agregar disponibilidad"
+              createLabel={handleAvailabilityCreateLabel}
+              helperText="Puedes agregar una nueva disponibilidad, pero si escribes algo equivalente a una existente como “stock” o “En stock”, se usará la opción existente y no se duplicará."
               disabled={false}
             />
 
