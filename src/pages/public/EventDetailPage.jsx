@@ -220,6 +220,84 @@ function getProductCharacters(product) {
   return [...new Set(characters)].filter(Boolean);
 }
 
+
+function getProductSeries(product) {
+  const series = [
+    ...normalizeArrayText(product?.serieNombre),
+    ...normalizeArrayText(product?.serieTexto),
+    ...normalizeArrayText(product?.serie),
+    ...normalizeArrayText(product?.seriesNombre),
+    ...normalizeArrayText(product?.series)
+  ];
+
+  return [...new Set(series)].filter(Boolean);
+}
+
+function getProductAvailabilityValue(product) {
+  const value =
+    product?.disponibilidad ||
+    product?.availability ||
+    product?.estado ||
+    "stock";
+
+  return value.toString().trim() || "stock";
+}
+
+function getAvailabilityLabel(value = "") {
+  const normalizedValue = normalizeText(value).replace(/\s+/g, "_");
+
+  const labels = {
+    stock: "En stock",
+    activo: "En stock",
+    preventa: "Preventa",
+    por_pedido: "Por pedido",
+    pedido: "Por pedido",
+    agotado: "Agotado",
+    inactivo: "Inactivo"
+  };
+
+  return labels[normalizedValue] || value || "En stock";
+}
+
+function getProductAvailabilityLabel(product) {
+  return getAvailabilityLabel(getProductAvailabilityValue(product));
+}
+
+function uniqueSortedText(values = []) {
+  const result = [];
+
+  values.forEach((value) => {
+    const cleanValue = value?.toString().trim();
+
+    if (!cleanValue) return;
+
+    const exists = result.some(
+      (item) => normalizeText(item) === normalizeText(cleanValue)
+    );
+
+    if (!exists) result.push(cleanValue);
+  });
+
+  return result.sort((a, b) => a.localeCompare(b));
+}
+
+function productMatchesSeries(product, selectedSeries) {
+  if (!selectedSeries) return true;
+
+  return getProductSeries(product).some(
+    (serie) => normalizeText(serie) === normalizeText(selectedSeries)
+  );
+}
+
+function productMatchesAvailability(product, selectedAvailability) {
+  if (!selectedAvailability) return true;
+
+  return (
+    normalizeText(getProductAvailabilityValue(product)) ===
+    normalizeText(selectedAvailability)
+  );
+}
+
 function productBelongsToEvent(product, event) {
   const eventId = getId(event);
   const eventSlug = getEventSlug(event);
@@ -678,6 +756,8 @@ function EventDetailPage() {
   const { events, products } = useAdminData();
 
   const [maxPrice, setMaxPrice] = useState(priceRangeConfig.max);
+  const [selectedSeries, setSelectedSeries] = useState("");
+  const [selectedAvailability, setSelectedAvailability] = useState("");
   const [selectedType, setSelectedType] = useState("");
   const [selectedCharacter, setSelectedCharacter] = useState("");
   const [feedbackMessage, setFeedbackMessage] = useState("");
@@ -710,23 +790,91 @@ function EventDetailPage() {
     });
   }, [products, event]);
 
-  const productTypes = useMemo(() => {
-    const types = eventProducts.flatMap(getProductTypes).filter(Boolean);
+  const eventSeriesOptions = useMemo(() => {
+    const eventSeries = event ? getEventSeries(event) : [];
+    const productSeries = eventProducts.flatMap(getProductSeries);
 
-    return [...new Set(types)].sort((a, b) => a.localeCompare(b));
+    return uniqueSortedText([...eventSeries, ...productSeries]);
+  }, [event, eventProducts]);
+
+  const shouldShowSeriesFilter = eventSeriesOptions.length > 1;
+
+  const productsMatchingSelectedSeries = useMemo(() => {
+    return eventProducts.filter((product) =>
+      productMatchesSeries(product, selectedSeries)
+    );
+  }, [eventProducts, selectedSeries]);
+
+  const availabilityOptions = useMemo(() => {
+    const options = eventProducts.map((product) => ({
+      value: getProductAvailabilityValue(product),
+      label: getProductAvailabilityLabel(product)
+    }));
+
+    const uniqueOptions = [];
+
+    options.forEach((option) => {
+      const exists = uniqueOptions.some(
+        (item) => normalizeText(item.value) === normalizeText(option.value)
+      );
+
+      if (!exists) uniqueOptions.push(option);
+    });
+
+    return uniqueOptions.sort((a, b) => a.label.localeCompare(b.label));
   }, [eventProducts]);
 
+  const productTypes = useMemo(() => {
+    const types = productsMatchingSelectedSeries
+      .flatMap(getProductTypes)
+      .filter(Boolean);
+
+    return uniqueSortedText(types);
+  }, [productsMatchingSelectedSeries]);
+
   const productCharacters = useMemo(() => {
-    const characters = eventProducts
+    const characters = productsMatchingSelectedSeries
       .flatMap(getProductCharacters)
       .filter(Boolean);
 
-    return [...new Set(characters)].sort((a, b) => a.localeCompare(b));
-  }, [eventProducts]);
+    return uniqueSortedText(characters);
+  }, [productsMatchingSelectedSeries]);
+
+  const shouldShowCharacterFilter = productCharacters.length > 0;
+
+  useEffect(() => {
+    if (!selectedSeries) return;
+
+    const selectedSeriesStillExists = eventSeriesOptions.some(
+      (serie) => normalizeText(serie) === normalizeText(selectedSeries)
+    );
+
+    if (!selectedSeriesStillExists) {
+      setSelectedSeries("");
+    }
+  }, [eventSeriesOptions, selectedSeries]);
+
+  useEffect(() => {
+    if (!selectedCharacter) return;
+
+    const selectedCharacterStillExists = productCharacters.some(
+      (character) =>
+        normalizeText(character) === normalizeText(selectedCharacter)
+    );
+
+    if (!selectedCharacterStillExists) {
+      setSelectedCharacter("");
+    }
+  }, [productCharacters, selectedCharacter]);
 
   const visibleProducts = useMemo(() => {
     return eventProducts.filter((product) => {
       const matchesPrice = getProductPrice(product) <= maxPrice;
+      const matchesSeries = productMatchesSeries(product, selectedSeries);
+      const matchesAvailability = productMatchesAvailability(
+        product,
+        selectedAvailability
+      );
 
       const matchesType = selectedType
         ? getProductTypes(product).some(
@@ -741,9 +889,22 @@ function EventDetailPage() {
           )
         : true;
 
-      return matchesPrice && matchesType && matchesCharacter;
+      return (
+        matchesPrice &&
+        matchesSeries &&
+        matchesAvailability &&
+        matchesType &&
+        matchesCharacter
+      );
     });
-  }, [eventProducts, maxPrice, selectedType, selectedCharacter]);
+  }, [
+    eventProducts,
+    maxPrice,
+    selectedSeries,
+    selectedAvailability,
+    selectedType,
+    selectedCharacter
+  ]);
 
   const eventTitle = event ? getEventTitle(event) : "";
   const eventSlug = event ? getEventSlug(event) : "";
@@ -1021,11 +1182,40 @@ function EventDetailPage() {
                 {getEventSeriesText(event)}
               </p>
 
-              <p className="mt-2 text-xs text-gray-500 leading-5">
-                No se muestra filtro de serie porque este evento ya tiene sus
-                series relacionadas definidas.
-              </p>
+              {shouldShowSeriesFilter ? (
+                <p className="mt-2 text-xs text-gray-500 leading-5">
+                  Este evento tiene varias series o productos de distintas
+                  series. Usa el filtro para ver solo una de ellas.
+                </p>
+              ) : (
+                <p className="mt-2 text-xs text-gray-500 leading-5">
+                  No se muestra selector porque solo hay una serie relacionada.
+                </p>
+              )}
             </div>
+
+            {shouldShowSeriesFilter && (
+              <label className="grid gap-2 text-sm font-bold">
+                Serie
+
+                <select
+                  value={selectedSeries}
+                  onChange={(event) => {
+                    setSelectedSeries(event.target.value);
+                    setSelectedCharacter("");
+                  }}
+                  className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                >
+                  <option value="">Todas las series</option>
+
+                  {eventSeriesOptions.map((serie) => (
+                    <option key={serie} value={serie}>
+                      {serie}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
 
             <div className="grid gap-3">
               <div className="flex items-center justify-between">
@@ -1053,6 +1243,26 @@ function EventDetailPage() {
               </div>
             </div>
 
+            {availabilityOptions.length > 0 && (
+              <label className="grid gap-2 text-sm font-bold">
+                Disponibilidad
+
+                <select
+                  value={selectedAvailability}
+                  onChange={(event) => setSelectedAvailability(event.target.value)}
+                  className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                >
+                  <option value="">Todas</option>
+
+                  {availabilityOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+
             <label className="grid gap-2 text-sm font-bold">
               Tipo de producto
 
@@ -1071,28 +1281,38 @@ function EventDetailPage() {
               </select>
             </label>
 
-            <label className="grid gap-2 text-sm font-bold">
-              Personaje
+            {shouldShowCharacterFilter && (
+              <label className="grid gap-2 text-sm font-bold">
+                Personaje
 
-              <select
-                value={selectedCharacter}
-                onChange={(event) => setSelectedCharacter(event.target.value)}
-                className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
-              >
-                <option value="">Todos</option>
+                <select
+                  value={selectedCharacter}
+                  onChange={(event) => setSelectedCharacter(event.target.value)}
+                  className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                >
+                  <option value="">Todos</option>
 
-                {productCharacters.map((character) => (
-                  <option key={character} value={character}>
-                    {character}
-                  </option>
-                ))}
-              </select>
-            </label>
+                  {productCharacters.map((character) => (
+                    <option key={character} value={character}>
+                      {character}
+                    </option>
+                  ))}
+                </select>
+
+                <span className="text-xs font-medium text-gray-500 leading-5">
+                  {selectedSeries
+                    ? "Solo se muestran personajes de la serie seleccionada."
+                    : "Solo aparece si los productos del evento tienen personajes registrados."}
+                </span>
+              </label>
+            )}
 
             <button
               type="button"
               onClick={() => {
                 setMaxPrice(priceRangeConfig.max);
+                setSelectedSeries("");
+                setSelectedAvailability("");
                 setSelectedType("");
                 setSelectedCharacter("");
               }}
