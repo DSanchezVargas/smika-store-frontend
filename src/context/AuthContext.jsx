@@ -26,6 +26,8 @@ function normalizeUser(user) {
   if (!user || typeof user !== "object") return null;
 
   const role = normalizeRole(user.role || user.rol);
+  const authProvider = user.authProvider || "local";
+  const googleLinked = Boolean(user.googleLinked || user.googleId || authProvider === "google");
 
   return {
     ...user,
@@ -38,6 +40,10 @@ function normalizeUser(user) {
     correo: user.correo || user.email || "",
     telefono: user.telefono || user.phone || "",
     telefonoCompleto: user.telefonoCompleto || "",
+    authProvider,
+    emailVerified: Boolean(user.emailVerified),
+    hasPassword: Boolean(user.hasPassword),
+    googleLinked,
     role
   };
 }
@@ -69,6 +75,19 @@ export function AuthProvider({ children }) {
     setUser(normalizedUser);
   };
 
+  const updateStoredUser = (newUser) => {
+    const normalizedUser = normalizeUser(newUser);
+
+    if (!normalizedUser) {
+      throw new Error("No se pudo actualizar el usuario.");
+    }
+
+    localStorage.setItem("smika_user", JSON.stringify(normalizedUser));
+    setUser(normalizedUser);
+
+    return normalizedUser;
+  };
+
   const refreshProfile = async () => {
     const storedToken = localStorage.getItem("smika_token");
 
@@ -78,17 +97,7 @@ export function AuthProvider({ children }) {
       method: "GET"
     });
 
-    const normalizedUser = normalizeUser(data.user);
-
-    if (!normalizedUser) {
-      throw new Error("No se pudo actualizar el perfil.");
-    }
-
-    localStorage.setItem("smika_user", JSON.stringify(normalizedUser));
-
-    setUser(normalizedUser);
-
-    return normalizedUser;
+    return updateStoredUser(data.user);
   };
 
   useEffect(() => {
@@ -160,6 +169,19 @@ export function AuthProvider({ children }) {
     return data;
   };
 
+  const linkGoogleAccount = async (credential) => {
+    const data = await apiRequest("/auth/google/link", {
+      method: "POST",
+      body: JSON.stringify({ credential })
+    });
+
+    if (data.user) {
+      updateStoredUser(data.user);
+    }
+
+    return data;
+  };
+
   const logout = () => {
     clearSession();
   };
@@ -189,6 +211,7 @@ export function AuthProvider({ children }) {
       registerUser,
       loginUser,
       loginWithGoogle,
+      linkGoogleAccount,
       logout,
       refreshProfile
     };
