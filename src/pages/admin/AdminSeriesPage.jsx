@@ -440,7 +440,6 @@ function AdminSeriesPage() {
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
   const [deletingSeriesId, setDeletingSeriesId] = useState("");
-  const [cleaningRemovedSeries, setCleaningRemovedSeries] = useState(false);
 
   const sortedSeries = useMemo(() => {
     return [...(series || [])].sort((a, b) => {
@@ -721,37 +720,6 @@ function AdminSeriesPage() {
     }
   };
 
-  const handleCleanupRemovedSeries = async () => {
-    const confirmed = window.confirm(
-      "Esto borrará definitivamente: Solo Leveling, Erha, Jujutsu Kaisen, Fan Merch Colección Especial, Bungou Stray Dogs, Given y Haikyuu. ¿Continuar?"
-    );
-
-    if (!confirmed) return;
-
-    setCleaningRemovedSeries(true);
-    setMessage("Borrando series no deseadas...");
-
-    try {
-      const response = await apiRequest("/series/cleanup/unwanted", {
-        method: "DELETE"
-      });
-
-      await refreshSeries?.();
-
-      const deletedCount = response?.deletedCount || 0;
-
-      setMessage(
-        deletedCount > 0
-          ? `Se borraron definitivamente ${deletedCount} series no deseadas.`
-          : "No se encontraron series no deseadas para borrar."
-      );
-    } catch (error) {
-      setMessage(error.message || "No se pudieron borrar las series no deseadas.");
-    } finally {
-      setCleaningRemovedSeries(false);
-    }
-  };
-
   return (
     <section className="space-y-6">
       <div className="rounded-[32px] bg-white p-8 smika-shadow border border-[#87CCC8]/20">
@@ -770,22 +738,6 @@ function AdminSeriesPage() {
           </div>
 
           <div className="flex flex-col gap-3 sm:flex-row">
-            {view === "list" && (
-              <button
-                type="button"
-                onClick={handleCleanupRemovedSeries}
-                disabled={saving || cleaningRemovedSeries}
-                className="rounded-full bg-red-50 px-5 py-3 font-black text-red-600 flex items-center justify-center gap-2 disabled:opacity-60"
-                title="Borrar definitivamente las series no deseadas"
-              >
-                {cleaningRemovedSeries ? (
-                  <Loader2 size={18} className="animate-spin" />
-                ) : (
-                  <Trash2 size={18} />
-                )}
-                Borrar no deseadas
-              </button>
-            )}
 
             {view === "list" && (
               <button

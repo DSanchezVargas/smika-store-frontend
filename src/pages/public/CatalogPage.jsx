@@ -10,8 +10,7 @@ import { getDynamicPriceRange } from "../../utils/priceRange";
 import {
   authorFilters,
   countryFilters,
-  genreFilters,
-  storyFiltersByCountry
+  genreFilters
 } from "../../data/catalogFilters";
 
 function createSlug(text = "") {
@@ -94,6 +93,18 @@ function getSeriesSlug(serie) {
   return serie?.slug || createSlug(serie?.nombre || serie?.titulo || serie?.id || serie?._id || "");
 }
 
+function getProductSeriesName(product = {}) {
+  return (
+    product.serieNombre ||
+    product.seriesNombre ||
+    product.historiaNombre ||
+    product.serie ||
+    product.series ||
+    product.historia ||
+    ""
+  );
+}
+
 function getProductCountryCode(product, seriesByName) {
   const directCountry =
     product.countryCode ||
@@ -104,9 +115,7 @@ function getProductCountryCode(product, seriesByName) {
 
   if (directCountry) return directCountry;
 
-  const serieKey = normalizeText(
-    product.serieNombre || product.serie || product.series || ""
-  );
+  const serieKey = normalizeText(getProductSeriesName(product));
 
   const foundSerie = seriesByName.get(serieKey);
 
@@ -126,7 +135,7 @@ function isProductFromCurrentSection(product, title, subcategory) {
   }
 
   if (section.includes("serie")) {
-    return Boolean(product.serie || product.series || product.serieNombre);
+    return Boolean(getProductSeriesName(product));
   }
 
   if (section.includes("evento")) {
@@ -187,6 +196,10 @@ function getProductTypeText(product) {
   return tipos.join(" ");
 }
 
+function isSerieVisiblePublic(serie) {
+  return serie?.activo !== false && serie?.activa !== false;
+}
+
 function CatalogPage({ title = "Catálogo" }) {
   const { subcategory } = useParams();
   const { products, series } = useAdminData();
@@ -201,15 +214,23 @@ function CatalogPage({ title = "Catálogo" }) {
 
   const isSeriesPage = title === "Series";
 
+  const activeSeries = useMemo(() => {
+    return (series || []).filter(isSerieVisiblePublic);
+  }, [series]);
+
   const seriesByName = useMemo(() => {
     const map = new Map();
 
-    (series || []).forEach((serie) => {
+    activeSeries.forEach((serie) => {
       map.set(normalizeText(serie.nombre), serie);
     });
 
     return map;
-  }, [series]);
+  }, [activeSeries]);
+
+  const activeSeriesNameSet = useMemo(() => {
+    return new Set(activeSeries.map((serie) => normalizeText(serie.nombre)));
+  }, [activeSeries]);
 
   const publicProducts = useMemo(() => {
     return getPublicProducts(products)
@@ -240,27 +261,21 @@ function CatalogPage({ title = "Catálogo" }) {
   const currentCountry = countryFromRoute || selectedCountry;
 
   const availableStories = useMemo(() => {
-    const storiesFromAdmin = (series || [])
+    return activeSeries
       .filter((serie) => {
-        if (serie.activo === false || serie.activa === false) return false;
         if (!currentCountry) return true;
 
         return getSeriesCountryCode(serie) === currentCountry;
       })
-      .map((serie) => serie.nombre);
-
-    const storiesFromStaticFilters = currentCountry
-      ? storyFiltersByCountry[currentCountry] || []
-      : Object.values(storyFiltersByCountry).flat();
-
-    return [...new Set([...storiesFromAdmin, ...storiesFromStaticFilters])];
-  }, [series, currentCountry]);
+      .map((serie) => serie.nombre)
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [activeSeries, currentCountry]);
 
   const visibleSeries = useMemo(() => {
     if (!isSeriesPage) return [];
 
-    return (series || [])
-      .filter((serie) => serie.activo !== false && serie.activa !== false)
+    return activeSeries
       .filter((serie) => {
         if (currentCountry && getSeriesCountryCode(serie) !== currentCountry) {
           return false;
@@ -302,7 +317,7 @@ function CatalogPage({ title = "Catálogo" }) {
       });
   }, [
     isSeriesPage,
-    series,
+    activeSeries,
     currentCountry,
     selectedStory,
     selectedGenre,
@@ -363,15 +378,22 @@ function CatalogPage({ title = "Catálogo" }) {
       }
 
       if (isSeriesPage) {
+        const productSeriesName = getProductSeriesName(product);
+        const normalizedProductSeriesName = normalizeText(productSeriesName);
+
+        if (!normalizedProductSeriesName) return false;
+
+        if (!activeSeriesNameSet.has(normalizedProductSeriesName)) {
+          return false;
+        }
+
         if (currentCountry && product.countryCode !== currentCountry) {
           return false;
         }
 
         if (
           selectedStory &&
-          normalizeText(
-            product.serie || product.series || product.serieNombre
-          ) !== normalizeText(selectedStory)
+          normalizedProductSeriesName !== normalizeText(selectedStory)
         ) {
           return false;
         }
@@ -403,6 +425,7 @@ function CatalogPage({ title = "Catálogo" }) {
     availability,
     typeSearch,
     isSeriesPage,
+    activeSeriesNameSet,
     currentCountry,
     selectedStory,
     selectedGenre,
