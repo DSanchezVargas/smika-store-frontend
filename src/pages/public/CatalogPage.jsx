@@ -33,6 +33,25 @@ function normalizeText(text = "") {
     .trim();
 }
 
+function normalizeCountryCode(value = "") {
+  const normalizedValue = normalizeText(value);
+
+  if (!normalizedValue) return "";
+
+  if (["cn", "china", "chinas"].includes(normalizedValue)) return "CN";
+  if (["kr", "corea", "coreanas", "korea"].includes(normalizedValue)) return "KR";
+
+  if (
+    ["jp", "japon", "japonas", "japonesas", "japón"].includes(normalizedValue)
+  ) {
+    return "JP";
+  }
+
+  if (["v", "variado", "variada", "varios"].includes(normalizedValue)) return "V";
+
+  return value;
+}
+
 function getImageSource(image) {
   if (!image) return "";
 
@@ -105,6 +124,34 @@ function getProductSeriesName(product = {}) {
   );
 }
 
+function getNameFromValue(value = "") {
+  if (value && typeof value === "object") {
+    return value.nombre || value.titulo || value.name || "";
+  }
+
+  return value || "";
+}
+
+function getProductCategoryName(product = {}) {
+  return (
+    product.categoriaNombre ||
+    product.categoryName ||
+    getNameFromValue(product.categoria) ||
+    getNameFromValue(product.category) ||
+    ""
+  );
+}
+
+function getProductSubcategoryName(product = {}) {
+  return (
+    product.subcategoriaNombre ||
+    product.subcategoryName ||
+    getNameFromValue(product.subcategoria) ||
+    getNameFromValue(product.subcategory) ||
+    ""
+  );
+}
+
 function getProductCountryCode(product, seriesByName) {
   const directCountry =
     product.countryCode ||
@@ -113,22 +160,26 @@ function getProductCountryCode(product, seriesByName) {
     product.country ||
     "";
 
-  if (directCountry) return directCountry;
+  if (directCountry) return normalizeCountryCode(directCountry);
 
   const serieKey = normalizeText(getProductSeriesName(product));
 
   const foundSerie = seriesByName.get(serieKey);
 
-  return foundSerie?.pais || foundSerie?.countryCode || "";
+  return normalizeCountryCode(foundSerie?.pais || foundSerie?.countryCode || "");
 }
 
 function isProductFromCurrentSection(product, title, subcategory) {
   const section = normalizeText(title);
-  const tipo = normalizeText(
-    `${product.tipo || ""} ${product.tipoProducto || ""} ${product.type || ""}`
-  );
+  const tipo = normalizeText(getProductTypeText(product));
   const estado = normalizeText(product.estado || product.status || "");
   const evento = product.evento || product.event || product.eventoNombre || "";
+
+  const categoriaTexto = normalizeText(getProductCategoryName(product));
+  const subcategoriaTexto = normalizeText(getProductSubcategoryName(product));
+  const categorySearchText = normalizeText(
+    `${categoriaTexto} ${subcategoriaTexto} ${tipo}`
+  );
 
   if (section.includes("nuevo")) {
     return true;
@@ -154,14 +205,21 @@ function isProductFromCurrentSection(product, title, subcategory) {
   }
 
   if (section.includes("personalizado")) {
-    return tipo.includes("personalizado");
+    if (!subcategory) {
+      return categoriaTexto.includes("personalizado") || tipo.includes("personalizado");
+    }
+
+    return (
+      matchesRoute(getProductSubcategoryName(product), subcategory) ||
+      categorySearchText.includes(normalizeText(subcategory))
+    );
   }
 
   return true;
 }
 
 function getSeriesCountryCode(serie) {
-  return serie.pais || serie.countryCode || "V";
+  return normalizeCountryCode(serie.pais || serie.countryCode || "V");
 }
 
 function getSeriesAuthor(serie) {
@@ -213,6 +271,8 @@ function CatalogPage({ title = "Catálogo" }) {
   const [selectedAuthor, setSelectedAuthor] = useState("");
 
   const isSeriesPage = title === "Series";
+  const isPersonalizedPage = title === "Personalizados";
+  const shouldShowStoryFilters = isSeriesPage || isPersonalizedPage;
 
   const activeSeries = useMemo(() => {
     return (series || []).filter(isSerieVisiblePublic);
@@ -377,14 +437,16 @@ function CatalogPage({ title = "Catálogo" }) {
         if (!searchableText.includes(search)) return false;
       }
 
-      if (isSeriesPage) {
+      if (shouldShowStoryFilters) {
         const productSeriesName = getProductSeriesName(product);
         const normalizedProductSeriesName = normalizeText(productSeriesName);
 
-        if (!normalizedProductSeriesName) return false;
+        if (isSeriesPage) {
+          if (!normalizedProductSeriesName) return false;
 
-        if (!activeSeriesNameSet.has(normalizedProductSeriesName)) {
-          return false;
+          if (!activeSeriesNameSet.has(normalizedProductSeriesName)) {
+            return false;
+          }
         }
 
         if (currentCountry && product.countryCode !== currentCountry) {
@@ -397,7 +459,9 @@ function CatalogPage({ title = "Catálogo" }) {
         ) {
           return false;
         }
+      }
 
+      if (isSeriesPage) {
         if (selectedGenre) {
           const genre = product.genero || product.genre || "";
 
@@ -424,6 +488,7 @@ function CatalogPage({ title = "Catálogo" }) {
     priceRange.max,
     availability,
     typeSearch,
+    shouldShowStoryFilters,
     isSeriesPage,
     activeSeriesNameSet,
     currentCountry,
@@ -515,7 +580,7 @@ function CatalogPage({ title = "Catálogo" }) {
               />
             </label>
 
-            {isSeriesPage && (
+            {shouldShowStoryFilters && (
               <>
                 <label className="grid gap-2 text-sm font-bold">
                   País / origen
@@ -555,39 +620,43 @@ function CatalogPage({ title = "Catálogo" }) {
                   </select>
                 </label>
 
-                <label className="grid gap-2 text-sm font-bold">
-                  Género
-                  <select
-                    value={selectedGenre}
-                    onChange={(event) => setSelectedGenre(event.target.value)}
-                    className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
-                  >
-                    <option value="">Todos</option>
+                {isSeriesPage && (
+                  <>
+                    <label className="grid gap-2 text-sm font-bold">
+                      Género
+                      <select
+                        value={selectedGenre}
+                        onChange={(event) => setSelectedGenre(event.target.value)}
+                        className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                      >
+                        <option value="">Todos</option>
 
-                    {genreFilters.map((genre) => (
-                      <option key={genre} value={genre}>
-                        {genre}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                        {genreFilters.map((genre) => (
+                          <option key={genre} value={genre}>
+                            {genre}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
 
-                <label className="grid gap-2 text-sm font-bold">
-                  Autor/a
-                  <select
-                    value={selectedAuthor}
-                    onChange={(event) => setSelectedAuthor(event.target.value)}
-                    className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
-                  >
-                    <option value="">Todos</option>
+                    <label className="grid gap-2 text-sm font-bold">
+                      Autor/a
+                      <select
+                        value={selectedAuthor}
+                        onChange={(event) => setSelectedAuthor(event.target.value)}
+                        className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                      >
+                        <option value="">Todos</option>
 
-                    {authorFilters.map((author) => (
-                      <option key={author} value={author}>
-                        {author}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                        {authorFilters.map((author) => (
+                          <option key={author} value={author}>
+                            {author}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </>
+                )}
               </>
             )}
           </div>
@@ -688,7 +757,11 @@ function CatalogPage({ title = "Catálogo" }) {
 
           <div>
             <h3 className="mb-5 text-2xl font-black">
-              {isSeriesPage ? "Productos de las series" : "Productos"}
+              {isSeriesPage
+                ? "Productos de las series"
+                : isPersonalizedPage && subcategory
+                ? `Productos de ${subcategory.replace("-", " ")}`
+                : "Productos"}
             </h3>
 
             {visibleProducts.length > 0 ? (

@@ -72,6 +72,10 @@ function App() {
           path="/personalizados"
           element={<CatalogPage title="Personalizados" />}
         />
+        <Route
+          path="/personalizados/:subcategory"
+          element={<CatalogPage title="Personalizados" />}
+        />
 
         <Route path="/productos/:slug" element={<ProductDetailPage />} />
         <Route path="/lista-pedido" element={<CartPage />} />

@@ -328,6 +328,16 @@ function normalizeProductFromApi(product = {}) {
       ? product.categoria
       : getId(product.categoria);
 
+  const subcategoriaNombre = getRelatedName(
+    product.subcategoria,
+    product.subcategoriaNombre || product.subcategory || ""
+  );
+
+  const subcategoriaId =
+    typeof product.subcategoria === "string"
+      ? product.subcategoria
+      : getId(product.subcategoria);
+
   const origenNombre = getRelatedName(
     product.origen,
     product.origenNombre || product.pais || ""
@@ -370,6 +380,10 @@ function normalizeProductFromApi(product = {}) {
     categoria: categoriaNombre,
     categoriaId,
     categoriaNombre,
+
+    subcategoria: subcategoriaNombre,
+    subcategoriaId,
+    subcategoriaNombre,
 
     origen: origenNombre,
     origenNombre,
@@ -617,6 +631,7 @@ function buildCharacterPayloadForApi(payload = {}) {
 
 function buildProductPayloadForApi(payload = {}, options = {}) {
   const categoryValue = payload.categoria || payload.categoriaId || "";
+  const subcategoryValue = payload.subcategoria || payload.subcategoriaId || "";
   const serieValue = payload.serie || payload.serieId || "";
   const eventValue = payload.evento || payload.eventoId || "";
   const originValue = payload.origen || payload.origenId || "";
@@ -643,6 +658,12 @@ function buildProductPayloadForApi(payload = {}, options = {}) {
     categoria: isMongoObjectId(categoryValue) ? categoryValue : "",
     categoriaId: isMongoObjectId(categoryValue) ? categoryValue : "",
     categoriaNombre: payload.categoriaNombre || getRelatedName(categoryValue),
+
+    subcategoria: isMongoObjectId(subcategoryValue) ? subcategoryValue : "",
+    subcategoriaId: isMongoObjectId(subcategoryValue) ? subcategoryValue : "",
+    subcategoriaNombre:
+      payload.subcategoriaNombre ||
+      (isMongoObjectId(subcategoryValue) ? "" : getRelatedName(subcategoryValue)),
 
     serie: isMongoObjectId(serieValue) ? serieValue : "",
     serieId: isMongoObjectId(serieValue) ? serieValue : "",

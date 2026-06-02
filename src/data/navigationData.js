@@ -49,7 +49,11 @@ export const mainNavigation = [
   },
   {
     label: "Personalizados",
-    path: "/personalizados"
+    path: "/personalizados",
+    children: [
+      { label: "Ver personalizados", path: "/personalizados" },
+      { label: "Gacha", path: "/personalizados/gacha" }
+    ]
   }
 ];
 

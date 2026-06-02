@@ -29,6 +29,7 @@ const initialForm = {
   nombre: "",
   descripcion: "",
   categoriaNombre: "",
+  subcategoriaNombre: "",
   serieNombre: "",
   eventoNombre: "",
   origenNombre: "",
@@ -51,6 +52,8 @@ const initialForm = {
 const baseProductTypes = [
   "Stand de acrílico",
   "Llavero",
+  "Peluche",
+  "Mini stand",
   "Photocard",
   "Pin",
   "Sticker",
@@ -193,6 +196,21 @@ function getProductCategoryName(product) {
     product?.categoriaNombre,
     product?.category
   );
+}
+
+function getProductSubcategoryName(product) {
+  if (product?.subcategoriaNombre) return product.subcategoriaNombre;
+  if (product?.subcategoryName) return product.subcategoryName;
+
+  if (product?.subcategoria && typeof product.subcategoria === "object") {
+    return getName(product.subcategoria);
+  }
+
+  if (product?.subcategory && typeof product.subcategory === "object") {
+    return getName(product.subcategory);
+  }
+
+  return product?.subcategory || product?.subcategoria || "";
 }
 
 function getProductSeriesName(product) {
@@ -551,9 +569,44 @@ function AdminProductsPage() {
   const categoryOptions = useMemo(() => {
     return (categories || [])
       .filter((category) => category.activa !== false && category.activo !== false)
+      .filter((category) => category.tipo !== "subcategoria")
       .map(buildOption)
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [categories]);
+
+  const selectedCategoryOption = useMemo(() => {
+    return getOptionByName(categoryOptions, form.categoriaNombre);
+  }, [categoryOptions, form.categoriaNombre]);
+
+  const subcategoryOptions = useMemo(() => {
+    const selectedCategoryId = getId(selectedCategoryOption);
+    const selectedCategoryName = selectedCategoryOption?.nombre || form.categoriaNombre;
+
+    return (categories || [])
+      .filter((category) => category.activa !== false && category.activo !== false)
+      .filter((category) => category.tipo === "subcategoria")
+      .filter((category) => {
+        if (!selectedCategoryName) return true;
+
+        const parentId = getId(category.categoriaPadre);
+        const parentName = getRelatedName(
+          category.categoriaPadre,
+          category.categoriaPadreNombre
+        );
+
+        if (selectedCategoryId && parentId) {
+          return parentId === selectedCategoryId;
+        }
+
+        if (parentName) {
+          return normalizeText(parentName) === normalizeText(selectedCategoryName);
+        }
+
+        return true;
+      })
+      .map(buildOption)
+      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
+  }, [categories, selectedCategoryOption, form.categoriaNombre]);
 
   const seriesOptions = useMemo(() => {
     return (series || [])
@@ -809,6 +862,7 @@ function AdminProductsPage() {
       nombre: product.nombre || "",
       descripcion: product.descripcion || "",
       categoriaNombre: getProductCategoryName(product),
+      subcategoriaNombre: getProductSubcategoryName(product),
       serieNombre: getProductSeriesName(product),
       eventoNombre: getProductEventName(product),
       origenNombre: getProductOriginName(product),
@@ -1035,6 +1089,72 @@ function AdminProductsPage() {
     };
   };
 
+  const ensureSubcategoryExists = async (category) => {
+    const subcategoryName = form.subcategoriaNombre.trim();
+
+    if (!subcategoryName) {
+      return {
+        id: "",
+        nombre: ""
+      };
+    }
+
+    const existingSubcategory = (categories || [])
+      .filter((item) => item.activa !== false && item.activo !== false)
+      .filter((item) => item.tipo === "subcategoria")
+      .find((item) => {
+        if (normalizeText(item.nombre) !== normalizeText(subcategoryName)) {
+          return false;
+        }
+
+        const parentId = getId(item.categoriaPadre);
+        const parentName = getRelatedName(
+          item.categoriaPadre,
+          item.categoriaPadreNombre
+        );
+
+        if (category?.id && parentId) {
+          return parentId === category.id;
+        }
+
+        if (category?.nombre && parentName) {
+          return normalizeText(parentName) === normalizeText(category.nombre);
+        }
+
+        return true;
+      });
+
+    if (existingSubcategory) {
+      return {
+        id: existingSubcategory._id || existingSubcategory.id,
+        nombre: existingSubcategory.nombre
+      };
+    }
+
+    if (!createCategoryFull) {
+      return {
+        id: "",
+        nombre: subcategoryName
+      };
+    }
+
+    const createdSubcategory = await createCategoryFull({
+      nombre: subcategoryName,
+      descripcion: `Subcategoría creada rápidamente desde productos para ${category?.nombre || "la categoría seleccionada"}.`,
+      tipo: "subcategoria",
+      categoriaPadre: category?.id || "",
+      orden: 0,
+      activa: true
+    });
+
+    await refreshCategories?.();
+
+    return {
+      id: createdSubcategory._id || createdSubcategory.id,
+      nombre: createdSubcategory.nombre
+    };
+  };
+
   const ensureOriginExists = async () => {
     const originName = form.origenNombre.trim() || "Variado";
     const existingOrigin = getOptionByName(originOptions, originName);
@@ -1173,6 +1293,7 @@ function AdminProductsPage() {
 
   const buildPayload = async () => {
     const category = await ensureCategoryExists();
+    const subcategory = await ensureSubcategoryExists(category);
     const origin = await ensureOriginExists();
     const serie = await ensureSeriesExists(origin);
     const event = await ensureEventExists({ origin, serie });
@@ -1190,6 +1311,10 @@ function AdminProductsPage() {
       categoriaId: category.id,
       categoria: category.id,
       categoriaNombre: category.nombre,
+
+      subcategoriaId: subcategory.id,
+      subcategoria: subcategory.id || subcategory.nombre,
+      subcategoriaNombre: subcategory.nombre || form.subcategoriaNombre.trim(),
 
       serieId: serie.id,
       serie: serie.id || serie.nombre,
@@ -1503,7 +1628,8 @@ function AdminProductsPage() {
               onChange={(value) =>
                 setForm((currentForm) => ({
                   ...currentForm,
-                  categoriaNombre: value
+                  categoriaNombre: value,
+                  subcategoriaNombre: ""
                 }))
               }
               onCreate={handleSimpleCreatableCreate}
@@ -1513,6 +1639,28 @@ function AdminProductsPage() {
               emptyCreateLabel="Agregar categoría"
               createLabel={(name) => `Agregar “${name}” a categorías`}
               helperText="Si no existe, se creará y se guardará en MongoDB al guardar el producto."
+            />
+
+            <CreatableSelect
+              label="Subcategoría"
+              value={form.subcategoriaNombre}
+              onChange={(value) =>
+                setForm((currentForm) => ({
+                  ...currentForm,
+                  subcategoriaNombre: value
+                }))
+              }
+              onCreate={handleSimpleCreatableCreate}
+              options={subcategoryOptions}
+              placeholder="Gacha, packs personalizados..."
+              emptyLabel="Sin subcategoría"
+              emptyCreateLabel="Agregar subcategoría"
+              createLabel={(name) =>
+                `Agregar “${name}” como subcategoría de “${form.categoriaNombre.trim()}”`
+              }
+              disabled={!form.categoriaNombre.trim()}
+              disabledText="Selecciona primero una categoría principal."
+              helperText="Ejemplo recomendado: Categoría Personalizados > Subcategoría Gacha. Si no existe, se creará al guardar el producto."
             />
 
             <CreatableSelect
@@ -1901,6 +2049,11 @@ function AdminProductsPage() {
                         <p>
                           <strong>Categoría:</strong>{" "}
                           {getProductCategoryName(product) || "Sin categoría"}
+                        </p>
+
+                        <p>
+                          <strong>Subcategoría:</strong>{" "}
+                          {getProductSubcategoryName(product) || "Sin subcategoría"}
                         </p>
 
                         <p>
