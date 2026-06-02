@@ -51,3 +51,17 @@ export const apiRequest = async (endpoint, options = {}) => {
 export function getApiBaseUrl() {
   return getCleanApiUrl();
 }
+
+export async function pingBackendHealth() {
+  try {
+    await fetch(`${getCleanApiUrl()}/health`, {
+      method: "GET",
+      cache: "no-store",
+      keepalive: true
+    });
+
+    return true;
+  } catch {
+    return false;
+  }
+}

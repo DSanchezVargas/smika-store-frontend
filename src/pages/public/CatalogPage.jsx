@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { BookOpen, ChevronRight, Image as ImageIcon, SlidersHorizontal } from "lucide-react";
+import { BookOpen, ChevronRight, Image as ImageIcon, LoaderCircle, SlidersHorizontal, Sparkles } from "lucide-react";
 
 import ProductCard from "../../components/product/ProductCard";
 import { useAdminData } from "../../context/AdminDataContext";
@@ -351,9 +351,81 @@ function isSerieVisiblePublic(serie) {
   return serie?.activo !== false && serie?.activa !== false;
 }
 
+
+function ProductSkeletonGrid() {
+  return (
+    <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <div
+          key={index}
+          className="smika-card overflow-hidden border border-[#87CCC8]/15 bg-white"
+        >
+          <div className="relative h-56 overflow-hidden bg-gradient-to-br from-[#F8F6F7] via-white to-[#ECFAF8]">
+            <div className="absolute inset-0 animate-pulse bg-white/40" />
+            <div className="absolute left-4 top-4 h-7 w-24 rounded-full bg-white/80" />
+            <div className="absolute bottom-5 left-1/2 h-28 w-28 -translate-x-1/2 rounded-3xl bg-white/70" />
+          </div>
+
+          <div className="space-y-4 p-5">
+            <div className="h-5 w-3/4 animate-pulse rounded-full bg-[#F8F6F7]" />
+            <div className="h-4 w-full animate-pulse rounded-full bg-[#F8F6F7]" />
+            <div className="h-4 w-2/3 animate-pulse rounded-full bg-[#F8F6F7]" />
+
+            <div className="flex items-center justify-between pt-2">
+              <div className="h-6 w-24 animate-pulse rounded-full bg-[#ECFAF8]" />
+              <div className="h-10 w-24 animate-pulse rounded-2xl bg-[#F7D9D8]/60" />
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function CatalogLoadingMessage({ hasCache = false }) {
+  return (
+    <div className="mb-6 overflow-hidden rounded-[28px] border border-[#87CCC8]/20 bg-gradient-to-br from-white via-[#ECFAF8]/70 to-[#F7D9D8]/35 p-5 shadow-sm">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center">
+        <div className="grid h-14 w-14 place-items-center rounded-3xl bg-white shadow-sm">
+          {hasCache ? (
+            <Sparkles className="text-[#87CCC8]" size={26} />
+          ) : (
+            <LoaderCircle className="animate-spin text-[#87CCC8]" size={26} />
+          )}
+        </div>
+
+        <div>
+          <p className="font-black text-[#2F2F2F]">
+            {hasCache
+              ? "Mostrando catálogo reciente mientras actualizamos novedades..."
+              : "Preparando el catálogo de Smika Store..."}
+          </p>
+
+          <p className="mt-1 text-sm leading-6 text-gray-600">
+            {hasCache
+              ? "Estamos verificando productos, eventos y disponibilidad en segundo plano."
+              : "Estamos cargando productos, eventos y novedades. Esto puede tardar unos segundos si el servidor está despertando."}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function CatalogPage({ title = "Catálogo" }) {
   const { subcategory } = useParams();
-  const { products, series, events } = useAdminData();
+  const {
+    products,
+    series,
+    events,
+    loadingProducts,
+    loadingSeries,
+    loadingEvents,
+    loadingPublicCatalog,
+    hasCachedCatalog,
+    initialDataLoaded,
+    refreshingAdminData
+  } = useAdminData();
 
   const [maxPrice, setMaxPrice] = useState(0);
   const [availability, setAvailability] = useState("Todos");
@@ -379,6 +451,17 @@ function CatalogPage({ title = "Catálogo" }) {
   const typeSearchPlaceholder = isPersonalizedPage
     ? "Peluche, llavero, pin, mini stand..."
     : "Stand, llavero, photocard...";
+
+  const isCatalogLoading =
+    Boolean(loadingPublicCatalog) ||
+    Boolean(loadingProducts) ||
+    Boolean(loadingSeries) ||
+    Boolean(loadingEvents) ||
+    Boolean(refreshingAdminData) ||
+    !initialDataLoaded;
+
+  const hasBaseCatalogData =
+    (products || []).length > 0 || (series || []).length > 0 || (events || []).length > 0;
 
   const activeSeries = useMemo(() => {
     return (series || []).filter(isSerieVisiblePublic);
@@ -871,6 +954,10 @@ function CatalogPage({ title = "Catálogo" }) {
         </aside>
 
         <div className="min-w-0 space-y-8">
+          {isCatalogLoading && (
+            <CatalogLoadingMessage hasCache={hasCachedCatalog && hasBaseCatalogData} />
+          )}
+
           {isSeriesPage && (
             <div>
               <div className="mb-5 flex items-center gap-2">
@@ -953,6 +1040,8 @@ function CatalogPage({ title = "Catálogo" }) {
                     );
                   })}
                 </div>
+              ) : loadingSeries || (!initialDataLoaded && !hasBaseCatalogData) ? (
+                <ProductSkeletonGrid />
               ) : (
                 <div className="rounded-3xl bg-[#F8F6F7] p-8 text-center">
                   <p className="font-black">
@@ -981,6 +1070,18 @@ function CatalogPage({ title = "Catálogo" }) {
                 {visibleProducts.map((product) => (
                   <ProductCard key={product.id || product._id} product={product} />
                 ))}
+              </div>
+            ) : isCatalogLoading && !hasBaseCatalogData ? (
+              <ProductSkeletonGrid />
+            ) : isCatalogLoading ? (
+              <div className="rounded-3xl border border-[#87CCC8]/20 bg-[#ECFAF8]/50 p-8 text-center">
+                <p className="font-black text-[#2F2F2F]">
+                  Estamos actualizando los productos...
+                </p>
+
+                <p className="mt-2 text-sm text-gray-500">
+                  Si acabas de entrar, espera unos segundos mientras se despierta el servidor.
+                </p>
               </div>
             ) : (
               <div className="rounded-3xl bg-[#F8F6F7] p-10 text-center">

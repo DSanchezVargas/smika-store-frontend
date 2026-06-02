@@ -51,7 +51,10 @@ import {
 
 const AdminDataContext = createContext(null);
 
-const STORAGE_KEY = "smika_admin_data_v1";
+const STORAGE_KEY = "smika_admin_data_cache_v2";
+const OLD_STORAGE_KEY = "smika_admin_data_v1";
+const CACHE_VERSION = 2;
+const CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
 
 const defaultAdminData = {
   products: [],
@@ -63,6 +66,141 @@ const defaultAdminData = {
   origins: [],
   users: []
 };
+
+function hasMeaningfulData(data = {}) {
+  return Object.keys(defaultAdminData).some((key) => {
+    const value = data?.[key];
+
+    return Array.isArray(value) && value.length > 0;
+  });
+}
+
+function compactImageValueForCache(image) {
+  const imageSource = getImageSource(image);
+
+  if (!imageSource) return "";
+
+  if (imageSource.startsWith("data:") && imageSource.length > 150000) {
+    return "";
+  }
+
+  return imageSource;
+}
+
+function compactImagesForCache(images = []) {
+  if (!Array.isArray(images)) return [];
+
+  return images
+    .map(compactImageValueForCache)
+    .filter(Boolean)
+    .slice(0, 4);
+}
+
+function compactItemForCache(item = {}) {
+  if (!item || typeof item !== "object") return item;
+
+  const compactItem = {
+    ...item
+  };
+
+  if (Array.isArray(compactItem.imagenes)) {
+    compactItem.imagenes = compactImagesForCache(compactItem.imagenes);
+  }
+
+  const mainImage = compactImageValueForCache(
+    compactItem.imagen || compactItem.image || compactItem.cover
+  );
+
+  if (mainImage) {
+    compactItem.imagen = mainImage;
+  } else if (compactItem.imagen?.startsWith?.("data:")) {
+    compactItem.imagen = "";
+  }
+
+  return compactItem;
+}
+
+function compactAdminDataForCache(data = defaultAdminData) {
+  return {
+    ...defaultAdminData,
+    products: (data.products || []).map(compactItemForCache),
+    events: (data.events || []).map(compactItemForCache),
+    series: (data.series || []).map(compactItemForCache),
+    characters: (data.characters || []).map(compactItemForCache),
+    categories: (data.categories || []).map(compactItemForCache),
+    creators: (data.creators || []).map(compactItemForCache),
+    origins: (data.origins || []).map(compactItemForCache),
+    users: []
+  };
+}
+
+function readCachedAdminData() {
+  if (typeof window === "undefined") {
+    return {
+      data: defaultAdminData,
+      hasCache: false,
+      cachedAt: null
+    };
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(STORAGE_KEY);
+
+    if (!rawValue) {
+      return {
+        data: defaultAdminData,
+        hasCache: false,
+        cachedAt: null
+      };
+    }
+
+    const parsedValue = JSON.parse(rawValue);
+    const cachedAt = Number(parsedValue.cachedAt || 0);
+    const isFreshEnough =
+      cachedAt > 0 && Date.now() - cachedAt <= CACHE_MAX_AGE_MS;
+
+    if (
+      parsedValue.version !== CACHE_VERSION ||
+      !parsedValue.data ||
+      !isFreshEnough
+    ) {
+      return {
+        data: defaultAdminData,
+        hasCache: false,
+        cachedAt: null
+      };
+    }
+
+    const cachedData = {
+      ...defaultAdminData,
+      ...parsedValue.data
+    };
+
+    return {
+      data: cachedData,
+      hasCache: hasMeaningfulData(cachedData),
+      cachedAt
+    };
+  } catch {
+    return {
+      data: defaultAdminData,
+      hasCache: false,
+      cachedAt: null
+    };
+  }
+}
+
+function writeCachedAdminData(data = defaultAdminData) {
+  if (typeof window === "undefined" || !hasMeaningfulData(data)) return;
+
+  const payload = {
+    version: CACHE_VERSION,
+    cachedAt: Date.now(),
+    data: compactAdminDataForCache(data)
+  };
+
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+}
 
 function createSlug(text = "") {
   return text
@@ -305,73 +443,6 @@ function normalizeCharacterFromApi(character = {}) {
   };
 }
 
-
-function createVariantCode(text = "", index = 0) {
-  const slug = text
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
-
-  return slug || `opcion-${index + 1}`;
-}
-
-function normalizeVariantMode(value = "sin_variantes") {
-  const cleanValue = normalizeText(value || "sin_variantes");
-
-  if (["precio_igual", "igual", "mismo_precio", "same_price"].includes(cleanValue)) {
-    return "precio_igual";
-  }
-
-  if (["precio_diferente", "diferente", "precio_variable", "different_price"].includes(cleanValue)) {
-    return "precio_diferente";
-  }
-
-  return "sin_variantes";
-}
-
-function normalizeProductVariants(value = [], basePrice = 0, mode = "sin_variantes") {
-  if (!Array.isArray(value)) return [];
-
-  const seenCodes = new Set();
-  const normalizedMode = normalizeVariantMode(mode);
-
-  return value
-    .map((variant, index) => {
-      const nombre = getName(variant, variant?.nombre || variant?.name || "").trim();
-
-      if (!nombre) return null;
-
-      const rawCode = variant?.codigo || variant?.code || variant?.id || createVariantCode(nombre, index);
-      let codigo = rawCode.toString().trim() || createVariantCode(nombre, index);
-
-      while (seenCodes.has(codigo)) {
-        codigo = `${codigo}-${index + 1}`;
-      }
-
-      seenCodes.add(codigo);
-
-      const priceValue =
-        normalizedMode === "precio_diferente"
-          ? Number(variant?.precio ?? variant?.price ?? variant?.precioReferencial ?? 0)
-          : Number(basePrice || 0);
-
-      return {
-        codigo,
-        nombre,
-        precio: priceValue,
-        stock: Number(variant?.stock || 0),
-        activa: variant?.activa !== undefined ? Boolean(variant.activa) : true,
-        orden: Number(variant?.orden ?? index)
-      };
-    })
-    .filter(Boolean)
-    .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
-}
-
 function normalizeProductFromApi(product = {}) {
   const mongoId = getId(product);
 
@@ -467,13 +538,6 @@ function normalizeProductFromApi(product = {}) {
     precio,
     price: precio,
     precioReferencial: precio,
-
-    varianteTipo: normalizeVariantMode(product.varianteTipo || product.tipoVariante),
-    variantes: normalizeProductVariants(
-      product.variantes || product.variants || [],
-      precio,
-      product.varianteTipo || product.tipoVariante
-    ),
 
     stock: Number(product.stock || 0),
     tiempoEstimado: product.tiempoEstimado || "",
@@ -773,13 +837,6 @@ function buildProductPayloadForApi(payload = {}, options = {}) {
     ),
     price: Number(payload.price ?? payload.precio ?? payload.precioReferencial ?? 0),
 
-    varianteTipo: normalizeVariantMode(payload.varianteTipo || payload.tipoVariante),
-    variantes: normalizeProductVariants(
-      payload.variantes || payload.variants || [],
-      Number(payload.precioReferencial ?? payload.precio ?? payload.price ?? 0),
-      payload.varianteTipo || payload.tipoVariante
-    ),
-
     stock: Number(payload.stock || 0),
 
     disponibilidad: payload.disponibilidad || "stock",
@@ -962,8 +1019,17 @@ function replaceItemById(collection = [], item) {
 }
 
 export function AdminDataProvider({ children }) {
-  const [adminData, setAdminData] = useState(defaultAdminData);
+  const cachedAdminData = useMemo(() => readCachedAdminData(), []);
+  const [adminData, setAdminData] = useState(cachedAdminData.data);
   const [storageError, setStorageError] = useState("");
+  const [hasCachedCatalog, setHasCachedCatalog] = useState(cachedAdminData.hasCache);
+  const [catalogCacheTimestamp, setCatalogCacheTimestamp] = useState(
+    cachedAdminData.cachedAt
+  );
+  const [initialDataLoaded, setInitialDataLoaded] = useState(
+    cachedAdminData.hasCache
+  );
+  const [refreshingAdminData, setRefreshingAdminData] = useState(false);
 
   const [productLoadError, setProductLoadError] = useState("");
   const [seriesLoadError, setSeriesLoadError] = useState("");
@@ -1147,15 +1213,22 @@ export function AdminDataProvider({ children }) {
   };
 
   const refreshAdminData = async () => {
-    await Promise.all([
-      refreshProducts(),
-      refreshSeries(),
-      refreshEvents(),
-      refreshCharacters(),
-      refreshCategories(),
-      refreshCreators(),
-      refreshOrigins()
-    ]);
+    setRefreshingAdminData(true);
+
+    try {
+      await Promise.allSettled([
+        refreshProducts(),
+        refreshSeries(),
+        refreshEvents(),
+        refreshCharacters(),
+        refreshCategories(),
+        refreshCreators(),
+        refreshOrigins()
+      ]);
+    } finally {
+      setInitialDataLoaded(true);
+      setRefreshingAdminData(false);
+    }
   };
 
   useEffect(() => {
@@ -1164,15 +1237,28 @@ export function AdminDataProvider({ children }) {
 
   useEffect(() => {
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(OLD_STORAGE_KEY);
       setStorageError("");
     } catch (error) {
       console.error("No se pudo limpiar el almacenamiento local antiguo.", error);
-      setStorageError(
-        "No se pudo limpiar el almacenamiento local antiguo. Si el aviso continúa, limpia el almacenamiento del sitio desde el navegador."
-      );
     }
   }, []);
+
+  useEffect(() => {
+    if (!hasMeaningfulData(adminData)) return;
+
+    try {
+      writeCachedAdminData(adminData);
+      setHasCachedCatalog(true);
+      setCatalogCacheTimestamp(Date.now());
+      setStorageError("");
+    } catch (error) {
+      console.error("No se pudo guardar la caché local del catálogo.", error);
+      setStorageError(
+        "No se pudo guardar una copia local del catálogo. La tienda seguirá funcionando, pero puede tardar más al abrir."
+      );
+    }
+  }, [adminData]);
 
   const createProduct = async (payload) => {
     const apiPayload = buildProductPayloadForApi(payload, {
@@ -1732,6 +1818,17 @@ export function AdminDataProvider({ children }) {
       loadingCreators,
       loadingOrigins,
 
+      hasCachedCatalog,
+      catalogCacheTimestamp,
+      initialDataLoaded,
+      refreshingAdminData,
+      loadingPublicCatalog:
+        !initialDataLoaded ||
+        loadingProducts ||
+        loadingSeries ||
+        loadingEvents ||
+        refreshingAdminData,
+
       products: adminData.products,
       events: adminData.events,
       series: adminData.series,
@@ -1807,6 +1904,10 @@ export function AdminDataProvider({ children }) {
       loadingCreators,
       loadingOrigins,
 
+      hasCachedCatalog,
+      catalogCacheTimestamp,
+      initialDataLoaded,
+      refreshingAdminData,
       adminData
     ]
   );
