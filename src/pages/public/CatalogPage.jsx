@@ -880,44 +880,39 @@ function CatalogPage({ title = "Catálogo" }) {
 
         <div className="space-y-8">
           {isEventsPage && (
-            <div className="rounded-[28px] bg-[#F8F6F7] p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <p className="text-sm font-black text-[#87CCC8]">
-                    Filtro por evento
+            <div className="rounded-[24px] border border-[#87CCC8]/20 bg-white/85 px-4 py-3 shadow-sm backdrop-blur">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-[#87CCC8]">
+                    Eventos disponibles
                   </p>
-                  <h3 className="mt-1 text-2xl font-black">
+                  <h3 className="mt-1 text-lg font-black text-[#2F2F2F]">
                     {selectedEventOption
                       ? selectedEventOption.nombre
                       : "Todos los eventos"}
                   </h3>
-                  <p className="mt-2 text-sm text-gray-600 leading-6">
-                    {selectedEventOption
-                      ? "Mostrando solo productos vinculados a este evento."
-                      : "Selecciona un evento para separar los productos que aparecen juntos."}
-                  </p>
                 </div>
 
                 {selectedEvent && (
                   <button
                     type="button"
                     onClick={() => setSelectedEvent("")}
-                    className="rounded-full bg-white px-4 py-2 text-sm font-black text-[#87CCC8] hover:bg-[#F7D9D8]/70"
+                    className="rounded-full border border-[#F7D9D8] bg-[#F7D9D8]/45 px-4 py-2 text-xs font-black text-[#2F2F2F] transition hover:bg-[#F7D9D8]"
                   >
-                    Ver todos
+                    Limpiar filtro
                   </button>
                 )}
               </div>
 
               {eventOptions.length > 0 ? (
-                <div className="mt-5 flex flex-wrap gap-2">
+                <div className="mt-3 flex max-w-full gap-2 overflow-x-auto pb-1 pr-1">
                   <button
                     type="button"
                     onClick={() => setSelectedEvent("")}
-                    className={`rounded-full px-4 py-2 text-sm font-black transition ${
+                    className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${
                       !selectedEvent
-                        ? "bg-[#87CCC8] text-white"
-                        : "bg-white text-gray-700 hover:bg-[#F7D9D8]/70"
+                        ? "bg-[#87CCC8] text-white shadow-sm"
+                        : "bg-[#F8F6F7] text-gray-700 hover:bg-[#F7D9D8]/70"
                     }`}
                   >
                     Todos
@@ -928,21 +923,21 @@ function CatalogPage({ title = "Catálogo" }) {
                       key={eventOption.id || eventOption.nombre}
                       type="button"
                       onClick={() => setSelectedEvent(eventOption.nombre)}
-                      className={`rounded-full px-4 py-2 text-sm font-black transition ${
+                      className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${
                         normalizeText(selectedEvent) === normalizeText(eventOption.nombre)
-                          ? "bg-[#87CCC8] text-white"
-                          : "bg-white text-gray-700 hover:bg-[#F7D9D8]/70"
+                          ? "bg-[#87CCC8] text-white shadow-sm"
+                          : "bg-[#F8F6F7] text-gray-700 hover:bg-[#F7D9D8]/70"
                       }`}
                     >
-                      {eventOption.nombre}
-                      <span className="ml-2 text-xs opacity-80">
+                      <span className="align-middle">{eventOption.nombre}</span>
+                      <span className="ml-2 inline-flex min-w-5 justify-center rounded-full bg-white/70 px-2 py-0.5 text-[10px] text-[#2F2F2F]">
                         {eventOption.productos}
                       </span>
                     </button>
                   ))}
                 </div>
               ) : (
-                <p className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-gray-500">
+                <p className="mt-3 rounded-2xl bg-[#F8F6F7] px-4 py-3 text-sm font-bold text-gray-500">
                   Aún no hay eventos activos registrados desde el panel admin.
                 </p>
               )}
