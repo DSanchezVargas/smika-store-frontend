@@ -14,6 +14,7 @@ import {
 
 import { useAdminData } from "../../context/AdminDataContext";
 import { useAuth } from "../../context/AuthContext";
+import { addProductToCart } from "../../services/cartService";
 import { getPublicProducts } from "../../utils/publicProducts";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 import {
@@ -74,6 +75,45 @@ function getStoredProductId(product) {
 
 function getProductPrice(product) {
   return Number(product?.precio || product?.price || product?.precioReferencial || 0);
+}
+
+
+function createVariantCode(text = "", index = 0) {
+  const slug = text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+
+  return slug || `opcion-${index + 1}`;
+}
+
+function getProductVariants(product) {
+  if (!product || product.varianteTipo === "sin_variantes") return [];
+  if (!Array.isArray(product.variantes)) return [];
+
+  return product.variantes
+    .map((variant, index) => ({
+      codigo: variant.codigo || createVariantCode(variant.nombre, index),
+      nombre: variant.nombre || variant.name || `Opción ${index + 1}`,
+      precio: Number(variant.precio ?? product?.precioReferencial ?? product?.precio ?? product?.price ?? 0),
+      stock: Number(variant.stock || 0),
+      activa: variant.activa !== false,
+      orden: Number(variant.orden ?? index)
+    }))
+    .filter((variant) => variant.activa && variant.nombre)
+    .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
+}
+
+function getVariantPrice(product, variant) {
+  if (variant && product?.varianteTipo === "precio_diferente") {
+    return Number(variant.precio || 0);
+  }
+
+  return getProductPrice(product);
 }
 
 function buildStoredProduct(product) {
@@ -160,6 +200,8 @@ function ProductDetailPage() {
   const [isWishlist, setIsWishlist] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
+  const [orderLoading, setOrderLoading] = useState(false);
+  const [selectedVariantCode, setSelectedVariantCode] = useState("");
 
   const user = auth?.user || auth?.currentUser || null;
   const isAuthenticated = Boolean(auth?.isAuthenticated || user);
@@ -173,6 +215,13 @@ function ProductDetailPage() {
   }, [publicProducts, slug]);
 
   const productId = getProductId(product);
+  const productVariants = getProductVariants(product);
+  const hasVariants = productVariants.length > 0;
+  const selectedVariant =
+    productVariants.find((variant) => variant.codigo === selectedVariantCode) ||
+    productVariants[0] ||
+    null;
+  const selectedPrice = getVariantPrice(product, selectedVariant);
 
   const galleryImages = useMemo(() => {
     if (!product) return [];
@@ -245,6 +294,18 @@ function ProductDetailPage() {
     setActiveImageIndex(0);
     setMessage("");
   }, [slug]);
+  useEffect(() => {
+    if (productVariants.length === 0) {
+      setSelectedVariantCode("");
+      return;
+    }
+
+    setSelectedVariantCode((currentCode) => {
+      const exists = productVariants.some((variant) => variant.codigo === currentCode);
+      return exists ? currentCode : productVariants[0].codigo;
+    });
+  }, [productId, productVariants.map((variant) => variant.codigo).join("|")]);
+
 
   useEffect(() => {
     refreshPreferenceState({ silent: true });
@@ -277,7 +338,7 @@ function ProductDetailPage() {
     });
   };
 
-  const handleAddToOrderList = () => {
+  const handleAddToOrderList = async () => {
     if (!product) return;
 
     if (!isAuthenticated) {
@@ -285,24 +346,37 @@ function ProductDetailPage() {
       return;
     }
 
-    const storedProduct = buildStoredProduct(product);
-    const currentList = readLocalArray(ORDER_LIST_KEY);
-
-    const exists = currentList.some((item) => {
-      return (
-        item.id === storedProduct.id ||
-        item.productId === storedProduct.productId ||
-        item.slug === storedProduct.slug
-      );
-    });
-
-    if (exists) {
-      setMessage("Este producto ya está en tu lista de pedido.");
+    if (!isMongoObjectId(productId)) {
+      setMessage("Este producto aún está siendo preparado. Intenta nuevamente más tarde.");
       return;
     }
 
-    saveLocalArray(ORDER_LIST_KEY, [...currentList, storedProduct]);
-    setMessage("Producto agregado a tu lista de pedido.");
+    if (hasVariants && !selectedVariant) {
+      setMessage("Selecciona una opción antes de agregar el producto.");
+      return;
+    }
+
+    try {
+      setOrderLoading(true);
+      setMessage("");
+
+      await addProductToCart(productId, 1, selectedVariant);
+
+      setMessage(
+        selectedVariant
+          ? `Agregado a tu lista: ${selectedVariant.nombre}.`
+          : "Producto agregado a tu lista de pedido."
+      );
+    } catch (error) {
+      if (error.status === 401 || error.message?.toLowerCase().includes("token")) {
+        goToLogin();
+        return;
+      }
+
+      setMessage(error.message || "No se pudo agregar a la lista de pedido.");
+    } finally {
+      setOrderLoading(false);
+    }
   };
 
   const handleSaveFavorite = async () => {
@@ -521,7 +595,7 @@ function ProductDetailPage() {
               </div>
 
               <p className="mt-3 text-3xl font-black text-[#2F2F2F]">
-                S/ {getProductPrice(product)}
+                S/ {selectedPrice}
               </p>
             </div>
 
@@ -573,6 +647,44 @@ function ProductDetailPage() {
             )}
           </div>
 
+          {hasVariants && (
+            <div className="mt-8 rounded-[28px] border border-[#87CCC8]/20 bg-[#F8F6F7] p-5">
+              <p className="text-sm font-black text-[#87CCC8]">Elige tu opción 💖</p>
+              <p className="mt-1 text-xs font-medium text-gray-500">
+                Selecciona el tipo/modelo antes de agregarlo a tu lista.
+              </p>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                {productVariants.map((variant) => {
+                  const active = selectedVariant?.codigo === variant.codigo;
+                  const variantPrice = getVariantPrice(product, variant);
+
+                  return (
+                    <button
+                      key={variant.codigo}
+                      type="button"
+                      onClick={() => setSelectedVariantCode(variant.codigo)}
+                      className={`rounded-3xl border px-4 py-4 text-left transition ${
+                        active
+                          ? "border-[#87CCC8] bg-white shadow-lg"
+                          : "border-transparent bg-white/70 hover:border-[#87CCC8]/50"
+                      }`}
+                    >
+                      <span className="block text-sm font-black text-[#2F2F2F]">
+                        {variant.nombre}
+                      </span>
+                      <span className="mt-1 block text-xs font-bold text-gray-500">
+                        {product.varianteTipo === "precio_diferente"
+                          ? `S/ ${variantPrice}`
+                          : `Mismo precio: S/ ${variantPrice}`}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {message && (
             <div className="mt-6 rounded-3xl bg-[#F7D9D8] px-5 py-4 text-sm font-black">
               {message}
@@ -583,9 +695,14 @@ function ProductDetailPage() {
             <button
               type="button"
               onClick={handleAddToOrderList}
-              className="smika-button-primary flex items-center gap-2"
+              disabled={orderLoading}
+              className="smika-button-primary flex items-center gap-2 disabled:opacity-60"
             >
-              <ShoppingBag size={18} />
+              {orderLoading ? (
+                <Loader2 size={18} className="animate-spin" />
+              ) : (
+                <ShoppingBag size={18} />
+              )}
               Agregar a lista de pedido
             </button>
 

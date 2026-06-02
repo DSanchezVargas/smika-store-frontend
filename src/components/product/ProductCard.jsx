@@ -47,6 +47,45 @@ function getProductPrice(product) {
   return Number(product?.precioReferencial || product?.precio || product?.price || 0);
 }
 
+
+function createVariantCode(text = "", index = 0) {
+  const slug = text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+
+  return slug || `opcion-${index + 1}`;
+}
+
+function getProductVariants(product) {
+  if (!product || product.varianteTipo === "sin_variantes") return [];
+  if (!Array.isArray(product.variantes)) return [];
+
+  return product.variantes
+    .map((variant, index) => ({
+      codigo: variant.codigo || createVariantCode(variant.nombre, index),
+      nombre: variant.nombre || variant.name || `Opción ${index + 1}`,
+      precio: Number(variant.precio ?? product?.precioReferencial ?? product?.precio ?? product?.price ?? 0),
+      stock: Number(variant.stock || 0),
+      activa: variant.activa !== false,
+      orden: Number(variant.orden ?? index)
+    }))
+    .filter((variant) => variant.activa && variant.nombre)
+    .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
+}
+
+function getVariantPrice(product, variant) {
+  if (variant && product?.varianteTipo === "precio_diferente") {
+    return Number(variant.precio || 0);
+  }
+
+  return getProductPrice(product);
+}
+
 function getProductType(product) {
   if (Array.isArray(product?.tiposProducto) && product.tiposProducto.length > 0) {
     return product.tiposProducto.join(", ");
@@ -119,6 +158,7 @@ function ProductCard({ product }) {
   const [cartLoading, setCartLoading] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [isFavorite, setIsFavorite] = useState(false);
+  const [selectedVariantCode, setSelectedVariantCode] = useState("");
 
   const user = auth?.user || auth?.currentUser || null;
   const isAuthenticated = Boolean(auth?.isAuthenticated || user);
@@ -127,7 +167,13 @@ function ProductCard({ product }) {
   const productSlug = product?.slug || productId;
   const productImage = getProductImage(product);
   const productName = getProductName(product);
-  const productPrice = getProductPrice(product);
+  const productVariants = getProductVariants(product);
+  const hasVariants = productVariants.length > 0;
+  const selectedVariant =
+    productVariants.find((variant) => variant.codigo === selectedVariantCode) ||
+    productVariants[0] ||
+    null;
+  const productPrice = getVariantPrice(product, selectedVariant);
   const productCategory = getProductCategory(product);
   const productSeries = getProductSeries(product);
   const availabilityText = getAvailabilityText(product);
@@ -180,6 +226,18 @@ function ProductCard({ product }) {
   useEffect(() => {
     refreshFavoriteState({ silent: true });
   }, [isAuthenticated, productId, productSlug]);
+  useEffect(() => {
+    if (productVariants.length === 0) {
+      setSelectedVariantCode("");
+      return;
+    }
+
+    setSelectedVariantCode((currentCode) => {
+      const exists = productVariants.some((variant) => variant.codigo === currentCode);
+      return exists ? currentCode : productVariants[0].codigo;
+    });
+  }, [productId, productVariants.map((variant) => variant.codigo).join("|")]);
+
 
   useEffect(() => {
     const handlePreferencesUpdated = (event) => {
@@ -213,7 +271,7 @@ function ProductCard({ product }) {
         return;
       }
 
-      await addProductToCart(productId, 1);
+      await addProductToCart(productId, 1, selectedVariant);
 
       showTemporaryMessage("Agregado a lista");
     } catch (error) {
@@ -334,6 +392,39 @@ function ProductCard({ product }) {
             )}
           </button>
         </div>
+
+        {hasVariants && (
+          <div className="mt-4 rounded-3xl bg-[#F8F6F7] p-3">
+            <p className="text-xs font-black text-gray-500">Elige opción</p>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {productVariants.slice(0, 5).map((variant) => (
+                <button
+                  key={variant.codigo}
+                  type="button"
+                  onClick={() => setSelectedVariantCode(variant.codigo)}
+                  className={`rounded-full px-3 py-2 text-xs font-black transition ${
+                    selectedVariant?.codigo === variant.codigo
+                      ? "bg-[#87CCC8] text-white"
+                      : "bg-white text-[#2F2F2F]"
+                  }`}
+                >
+                  {variant.nombre}
+                  {product.varianteTipo === "precio_diferente"
+                    ? ` · S/ ${variant.precio}`
+                    : ""}
+                </button>
+              ))}
+            </div>
+            {productVariants.length > 5 && (
+              <Link
+                to={`/productos/${productSlug}`}
+                className="mt-2 inline-flex text-xs font-black text-[#87CCC8]"
+              >
+                Ver más opciones
+              </Link>
+            )}
+          </div>
+        )}
 
         {cartMessage && (
           <p className="mt-3 rounded-2xl bg-[#F7D9D8] px-3 py-2 text-center text-xs font-black text-[#2F2F2F]">

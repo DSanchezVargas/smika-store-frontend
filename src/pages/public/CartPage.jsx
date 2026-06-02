@@ -33,6 +33,22 @@ function getProductPrice(product, item) {
   );
 }
 
+
+function getItemVariantCode(item) {
+  return item?.varianteCodigo || item?.variantCode || "";
+}
+
+function getItemVariantName(item) {
+  return item?.varianteNombre || item?.variantName || "";
+}
+
+function getCartItemKey(item) {
+  const productId = getProductId(item?.producto) || item?.producto || "producto";
+  const variantCode = getItemVariantCode(item);
+
+  return variantCode ? `${productId}-${variantCode}` : productId;
+}
+
 function formatMoney(value) {
   return Number(value || 0).toLocaleString("es-PE", {
     minimumFractionDigits: 0,
@@ -162,12 +178,12 @@ function CartPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
-  const handleUpdateQuantity = async (productId, nextQuantity) => {
+  const handleUpdateQuantity = async (productId, nextQuantity, item = null) => {
     if (nextQuantity < 1) return;
 
     try {
       setActionLoading(true);
-      const data = await updateCartQuantity(productId, nextQuantity);
+      const data = await updateCartQuantity(productId, nextQuantity, item);
       setCart(data.cart);
     } catch (error) {
       setMessage(error.message || "No se pudo actualizar la cantidad.");
@@ -176,10 +192,10 @@ function CartPage() {
     }
   };
 
-  const handleRemoveItem = async (productId) => {
+  const handleRemoveItem = async (productId, item = null) => {
     try {
       setActionLoading(true);
-      const data = await removeProductFromCart(productId);
+      const data = await removeProductFromCart(productId, item);
       setCart(data.cart);
     } catch (error) {
       setMessage(error.message || "No se pudo quitar el producto.");
@@ -280,6 +296,7 @@ function CartPage() {
               const product = item.producto;
               const productId = getProductId(product);
               const quantity = Number(item.cantidad || 1);
+              const variantName = getItemVariantName(item);
               const price = getProductPrice(product, item);
               const subtotal = getCartItemSubtotal(product, item);
               const image = getProductImage(product);
@@ -287,7 +304,7 @@ function CartPage() {
                 isAvailabilityByConfirmation(product);
 
               return (
-                <article key={productId} className="smika-card p-5 smika-shadow">
+                <article key={getCartItemKey(item)} className="smika-card p-5 smika-shadow">
                   <div className="flex flex-col gap-4 sm:flex-row">
                     <div className="h-28 w-28 shrink-0 overflow-hidden rounded-3xl bg-[#F8F6F7]">
                       {product?.imagenes?.[0] ? (
@@ -314,6 +331,12 @@ function CartPage() {
                       <h3 className="text-xl font-black text-[#2F2F2F]">
                         {product?.nombre || "Producto Smika"}
                       </h3>
+
+                      {variantName && (
+                        <p className="mt-2 inline-flex rounded-full bg-[#87CCC8] px-3 py-1 text-xs font-black text-white">
+                          Opción: {variantName}
+                        </p>
+                      )}
 
                       <div className="mt-2 flex flex-wrap gap-2 text-xs font-black">
                         {getProductSerie(product) && (
@@ -361,7 +384,7 @@ function CartPage() {
                               type="button"
                               disabled={actionLoading || quantity <= 1}
                               onClick={() =>
-                                handleUpdateQuantity(productId, quantity - 1)
+                                handleUpdateQuantity(productId, quantity - 1, item)
                               }
                               className="h-9 w-9 rounded-full bg-[#F8F6F7] flex items-center justify-center disabled:opacity-50"
                             >
@@ -376,7 +399,7 @@ function CartPage() {
                               type="button"
                               disabled={actionLoading}
                               onClick={() =>
-                                handleUpdateQuantity(productId, quantity + 1)
+                                handleUpdateQuantity(productId, quantity + 1, item)
                               }
                               className="h-9 w-9 rounded-full bg-[#87CCC8] text-white flex items-center justify-center disabled:opacity-50"
                             >
@@ -388,7 +411,7 @@ function CartPage() {
                         <button
                           type="button"
                           disabled={actionLoading}
-                          onClick={() => handleRemoveItem(productId)}
+                          onClick={() => handleRemoveItem(productId, item)}
                           className="h-10 w-10 rounded-full bg-[#F7D9D8] flex items-center justify-center disabled:opacity-50"
                           title="Quitar producto"
                         >

@@ -77,6 +77,25 @@ async function parseResponse(response) {
   return data;
 }
 
+function normalizeVariantPayload(variant = null) {
+  if (!variant) return {};
+
+  if (typeof variant === "string") {
+    return {
+      varianteCodigo: variant
+    };
+  }
+
+  return {
+    ...(variant.codigo || variant.varianteCodigo || variant.code
+      ? { varianteCodigo: variant.codigo || variant.varianteCodigo || variant.code }
+      : {}),
+    ...(variant.nombre || variant.varianteNombre || variant.name
+      ? { varianteNombre: variant.nombre || variant.varianteNombre || variant.name }
+      : {})
+  };
+}
+
 export function hasCartToken() {
   return Boolean(getStoredToken());
 }
@@ -90,38 +109,41 @@ export async function getCart() {
   return parseResponse(response);
 }
 
-export async function addProductToCart(productId, cantidad = 1) {
+export async function addProductToCart(productId, cantidad = 1, variant = null) {
   const response = await fetch(`${API_URL}/cart/add`, {
     method: "POST",
     headers: buildAuthHeaders(),
     body: JSON.stringify({
       producto: productId,
-      cantidad
+      cantidad,
+      ...normalizeVariantPayload(variant)
     })
   });
 
   return parseResponse(response);
 }
 
-export async function updateCartQuantity(productId, cantidad) {
+export async function updateCartQuantity(productId, cantidad, variant = null) {
   const response = await fetch(`${API_URL}/cart/item`, {
     method: "PUT",
     headers: buildAuthHeaders(),
     body: JSON.stringify({
       producto: productId,
-      cantidad
+      cantidad,
+      ...normalizeVariantPayload(variant)
     })
   });
 
   return parseResponse(response);
 }
 
-export async function removeProductFromCart(productId) {
+export async function removeProductFromCart(productId, variant = null) {
   const response = await fetch(`${API_URL}/cart/item`, {
     method: "DELETE",
     headers: buildAuthHeaders(),
     body: JSON.stringify({
-      producto: productId
+      producto: productId,
+      ...normalizeVariantPayload(variant)
     })
   });
 

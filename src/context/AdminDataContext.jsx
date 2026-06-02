@@ -305,6 +305,73 @@ function normalizeCharacterFromApi(character = {}) {
   };
 }
 
+
+function createVariantCode(text = "", index = 0) {
+  const slug = text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+
+  return slug || `opcion-${index + 1}`;
+}
+
+function normalizeVariantMode(value = "sin_variantes") {
+  const cleanValue = normalizeText(value || "sin_variantes");
+
+  if (["precio_igual", "igual", "mismo_precio", "same_price"].includes(cleanValue)) {
+    return "precio_igual";
+  }
+
+  if (["precio_diferente", "diferente", "precio_variable", "different_price"].includes(cleanValue)) {
+    return "precio_diferente";
+  }
+
+  return "sin_variantes";
+}
+
+function normalizeProductVariants(value = [], basePrice = 0, mode = "sin_variantes") {
+  if (!Array.isArray(value)) return [];
+
+  const seenCodes = new Set();
+  const normalizedMode = normalizeVariantMode(mode);
+
+  return value
+    .map((variant, index) => {
+      const nombre = getName(variant, variant?.nombre || variant?.name || "").trim();
+
+      if (!nombre) return null;
+
+      const rawCode = variant?.codigo || variant?.code || variant?.id || createVariantCode(nombre, index);
+      let codigo = rawCode.toString().trim() || createVariantCode(nombre, index);
+
+      while (seenCodes.has(codigo)) {
+        codigo = `${codigo}-${index + 1}`;
+      }
+
+      seenCodes.add(codigo);
+
+      const priceValue =
+        normalizedMode === "precio_diferente"
+          ? Number(variant?.precio ?? variant?.price ?? variant?.precioReferencial ?? 0)
+          : Number(basePrice || 0);
+
+      return {
+        codigo,
+        nombre,
+        precio: priceValue,
+        stock: Number(variant?.stock || 0),
+        activa: variant?.activa !== undefined ? Boolean(variant.activa) : true,
+        orden: Number(variant?.orden ?? index)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
+}
+
 function normalizeProductFromApi(product = {}) {
   const mongoId = getId(product);
 
@@ -400,6 +467,13 @@ function normalizeProductFromApi(product = {}) {
     precio,
     price: precio,
     precioReferencial: precio,
+
+    varianteTipo: normalizeVariantMode(product.varianteTipo || product.tipoVariante),
+    variantes: normalizeProductVariants(
+      product.variantes || product.variants || [],
+      precio,
+      product.varianteTipo || product.tipoVariante
+    ),
 
     stock: Number(product.stock || 0),
     tiempoEstimado: product.tiempoEstimado || "",
@@ -698,6 +772,13 @@ function buildProductPayloadForApi(payload = {}, options = {}) {
       payload.precioReferencial ?? payload.precio ?? payload.price ?? 0
     ),
     price: Number(payload.price ?? payload.precio ?? payload.precioReferencial ?? 0),
+
+    varianteTipo: normalizeVariantMode(payload.varianteTipo || payload.tipoVariante),
+    variantes: normalizeProductVariants(
+      payload.variantes || payload.variants || [],
+      Number(payload.precioReferencial ?? payload.precio ?? payload.price ?? 0),
+      payload.varianteTipo || payload.tipoVariante
+    ),
 
     stock: Number(payload.stock || 0),
 
