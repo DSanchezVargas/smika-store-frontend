@@ -213,6 +213,28 @@ function getProductSubcategoryName(product = {}) {
   );
 }
 
+function getProductEventName(product = {}) {
+  return (
+    product.eventoNombre ||
+    product.eventName ||
+    getNameFromValue(product.evento) ||
+    getNameFromValue(product.event) ||
+    ""
+  );
+}
+
+function getEventDisplayName(event = {}) {
+  return event.titulo || event.nombre || event.name || "";
+}
+
+function getEventOptionId(event = {}, fallback = "") {
+  return event._id || event.id || event.slug || fallback;
+}
+
+function isEventVisiblePublic(event = {}) {
+  return event.activo !== false;
+}
+
 function getProductCountryCode(product, seriesByName) {
   const directCountry =
     product.countryCode ||
@@ -234,7 +256,7 @@ function isProductFromCurrentSection(product, title, subcategory, personalizedRo
   const section = normalizeText(title);
   const tipo = normalizeText(getProductTypeText(product));
   const estado = normalizeText(product.estado || product.status || "");
-  const evento = product.evento || product.event || product.eventoNombre || "";
+  const evento = getProductEventName(product);
 
   const categoriaTexto = normalizeText(getProductCategoryName(product));
   const subcategoriaTexto = normalizeText(getProductSubcategoryName(product));
@@ -331,7 +353,7 @@ function isSerieVisiblePublic(serie) {
 
 function CatalogPage({ title = "Catálogo" }) {
   const { subcategory } = useParams();
-  const { products, series } = useAdminData();
+  const { products, series, events } = useAdminData();
 
   const [maxPrice, setMaxPrice] = useState(0);
   const [availability, setAvailability] = useState("Todos");
@@ -340,8 +362,10 @@ function CatalogPage({ title = "Catálogo" }) {
   const [selectedStory, setSelectedStory] = useState("");
   const [selectedGenre, setSelectedGenre] = useState("");
   const [selectedAuthor, setSelectedAuthor] = useState("");
+  const [selectedEvent, setSelectedEvent] = useState("");
 
   const isSeriesPage = title === "Series";
+  const isEventsPage = title === "Eventos";
   const isPersonalizedPage = title === "Personalizados";
   const personalizedRouteConfig = useMemo(
     () => (isPersonalizedPage ? getPersonalizedRouteConfig(subcategory) : null),
@@ -476,6 +500,65 @@ function CatalogPage({ title = "Catálogo" }) {
     );
   }, [publicProducts, title, subcategory, personalizedRouteConfig]);
 
+  const eventOptions = useMemo(() => {
+    if (!isEventsPage) return [];
+
+    const optionsByName = new Map();
+
+    const addOption = (name, extraData = {}) => {
+      const cleanName = name?.toString().trim();
+
+      if (!cleanName) return;
+
+      const key = normalizeText(cleanName);
+      const currentOption = optionsByName.get(key);
+
+      optionsByName.set(key, {
+        id: extraData.id || currentOption?.id || cleanName,
+        nombre: cleanName,
+        slug: extraData.slug || currentOption?.slug || createSlug(cleanName),
+        productos:
+          Number(currentOption?.productos || 0) + Number(extraData.productos || 0),
+        fromAdmin: Boolean(extraData.fromAdmin || currentOption?.fromAdmin)
+      });
+    };
+
+    (events || [])
+      .filter(isEventVisiblePublic)
+      .forEach((event) => {
+        const eventName = getEventDisplayName(event);
+
+        addOption(eventName, {
+          id: getEventOptionId(event, eventName),
+          slug: event.slug || createSlug(eventName),
+          productos: 0,
+          fromAdmin: true
+        });
+      });
+
+    sectionProducts.forEach((product) => {
+      const productEventName = getProductEventName(product);
+
+      addOption(productEventName, {
+        productos: 1
+      });
+    });
+
+    return Array.from(optionsByName.values()).sort((a, b) => {
+      if (a.productos !== b.productos) return b.productos - a.productos;
+
+      return a.nombre.localeCompare(b.nombre);
+    });
+  }, [events, isEventsPage, sectionProducts]);
+
+  const selectedEventOption = useMemo(() => {
+    if (!selectedEvent) return null;
+
+    return eventOptions.find(
+      (eventOption) => normalizeText(eventOption.nombre) === normalizeText(selectedEvent)
+    );
+  }, [eventOptions, selectedEvent]);
+
   const priceRange = useMemo(() => {
     return getDynamicPriceRange(sectionProducts);
   }, [sectionProducts]);
@@ -483,6 +566,10 @@ function CatalogPage({ title = "Catálogo" }) {
   useEffect(() => {
     setMaxPrice(priceRange.max);
   }, [priceRange.max, title, subcategory]);
+
+  useEffect(() => {
+    setSelectedEvent("");
+  }, [title, subcategory]);
 
   const visibleProducts = useMemo(() => {
     const priceLimit = maxPrice || priceRange.max;
@@ -521,6 +608,14 @@ function CatalogPage({ title = "Catálogo" }) {
         );
 
         if (!searchableText.includes(search)) return false;
+      }
+
+      if (isEventsPage && selectedEvent) {
+        const productEventName = getProductEventName(product);
+
+        if (normalizeText(productEventName) !== normalizeText(selectedEvent)) {
+          return false;
+        }
       }
 
       if (shouldShowStoryFilters) {
@@ -574,6 +669,8 @@ function CatalogPage({ title = "Catálogo" }) {
     priceRange.max,
     availability,
     typeSearch,
+    isEventsPage,
+    selectedEvent,
     shouldShowStoryFilters,
     isSeriesPage,
     activeSeriesNameSet,
@@ -604,6 +701,13 @@ function CatalogPage({ title = "Catálogo" }) {
             Explora historias y series por origen. En esta vista verás la
             portada principal; al entrar al detalle podrás ver la portada junto
             con el carrusel completo.
+          </p>
+        )}
+
+        {isEventsPage && (
+          <p className="mt-3 text-gray-600 max-w-3xl leading-7">
+            Revisa los productos agrupados por evento. Usa el filtro de evento
+            para ver solo los productos vinculados por la administradora.
           </p>
         )}
       </div>
@@ -665,6 +769,32 @@ function CatalogPage({ title = "Catálogo" }) {
                 placeholder={typeSearchPlaceholder}
               />
             </label>
+
+            {isEventsPage && (
+              <label className="grid gap-2 text-sm font-bold">
+                Evento
+                <select
+                  value={selectedEvent}
+                  onChange={(event) => setSelectedEvent(event.target.value)}
+                  className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                >
+                  <option value="">Todos los eventos</option>
+
+                  {eventOptions.map((eventOption) => (
+                    <option
+                      key={eventOption.id || eventOption.nombre}
+                      value={eventOption.nombre}
+                    >
+                      {eventOption.nombre}
+                      {eventOption.productos > 0 ? ` (${eventOption.productos})` : ""}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs font-medium text-gray-500 leading-5">
+                  Se muestran los eventos activos creados desde el panel admin.
+                </span>
+              </label>
+            )}
 
             {shouldShowStoryFilters && (
               <>
@@ -749,6 +879,76 @@ function CatalogPage({ title = "Catálogo" }) {
         </aside>
 
         <div className="space-y-8">
+          {isEventsPage && (
+            <div className="rounded-[28px] bg-[#F8F6F7] p-5">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-[#87CCC8]">
+                    Filtro por evento
+                  </p>
+                  <h3 className="mt-1 text-2xl font-black">
+                    {selectedEventOption
+                      ? selectedEventOption.nombre
+                      : "Todos los eventos"}
+                  </h3>
+                  <p className="mt-2 text-sm text-gray-600 leading-6">
+                    {selectedEventOption
+                      ? "Mostrando solo productos vinculados a este evento."
+                      : "Selecciona un evento para separar los productos que aparecen juntos."}
+                  </p>
+                </div>
+
+                {selectedEvent && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEvent("")}
+                    className="rounded-full bg-white px-4 py-2 text-sm font-black text-[#87CCC8] hover:bg-[#F7D9D8]/70"
+                  >
+                    Ver todos
+                  </button>
+                )}
+              </div>
+
+              {eventOptions.length > 0 ? (
+                <div className="mt-5 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setSelectedEvent("")}
+                    className={`rounded-full px-4 py-2 text-sm font-black transition ${
+                      !selectedEvent
+                        ? "bg-[#87CCC8] text-white"
+                        : "bg-white text-gray-700 hover:bg-[#F7D9D8]/70"
+                    }`}
+                  >
+                    Todos
+                  </button>
+
+                  {eventOptions.map((eventOption) => (
+                    <button
+                      key={eventOption.id || eventOption.nombre}
+                      type="button"
+                      onClick={() => setSelectedEvent(eventOption.nombre)}
+                      className={`rounded-full px-4 py-2 text-sm font-black transition ${
+                        normalizeText(selectedEvent) === normalizeText(eventOption.nombre)
+                          ? "bg-[#87CCC8] text-white"
+                          : "bg-white text-gray-700 hover:bg-[#F7D9D8]/70"
+                      }`}
+                    >
+                      {eventOption.nombre}
+                      <span className="ml-2 text-xs opacity-80">
+                        {eventOption.productos}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-4 rounded-2xl bg-white px-4 py-3 text-sm font-bold text-gray-500">
+                  Aún no hay eventos activos registrados desde el panel admin.
+                </p>
+              )}
+            </div>
+          )}
+
           {isSeriesPage && (
             <div>
               <div className="mb-5 flex items-center gap-2">
@@ -845,6 +1045,10 @@ function CatalogPage({ title = "Catálogo" }) {
             <h3 className="mb-5 text-2xl font-black">
               {isSeriesPage
                 ? "Productos de las series"
+                : isEventsPage && selectedEvent
+                ? `Productos de ${selectedEvent}`
+                : isEventsPage
+                ? "Productos por evento"
                 : isPersonalizedPage && subcategory
                 ? `Productos de ${routeDisplayLabel}`
                 : "Productos"}
