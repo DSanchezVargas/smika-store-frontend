@@ -52,6 +52,67 @@ function normalizeCountryCode(value = "") {
   return value;
 }
 
+function getPersonalizedRouteConfig(route = "") {
+  const routeSlug = createSlug(route);
+
+  const routeMap = {
+    gacha: {
+      label: "Gacha",
+      subcategoryName: "Gacha",
+      countryCode: ""
+    },
+    "gacha-japon": {
+      label: "Gacha Japón",
+      subcategoryName: "Gacha",
+      countryCode: "JP"
+    },
+    "gacha-japonesas": {
+      label: "Gacha Japón",
+      subcategoryName: "Gacha",
+      countryCode: "JP"
+    },
+    "gacha-china": {
+      label: "Gacha China",
+      subcategoryName: "Gacha",
+      countryCode: "CN"
+    },
+    "gacha-chinas": {
+      label: "Gacha China",
+      subcategoryName: "Gacha",
+      countryCode: "CN"
+    },
+    "gacha-corea": {
+      label: "Gacha Corea",
+      subcategoryName: "Gacha",
+      countryCode: "KR"
+    },
+    "gacha-coreanas": {
+      label: "Gacha Corea",
+      subcategoryName: "Gacha",
+      countryCode: "KR"
+    },
+    "gacha-variado": {
+      label: "Gacha variado",
+      subcategoryName: "Gacha",
+      countryCode: "V"
+    }
+  };
+
+  return routeMap[routeSlug] || null;
+}
+
+function getRouteDisplayLabel(route = "") {
+  const personalizedRoute = getPersonalizedRouteConfig(route);
+
+  if (personalizedRoute) return personalizedRoute.label;
+
+  return route
+    .split("-")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
 function getImageSource(image) {
   if (!image) return "";
 
@@ -169,7 +230,7 @@ function getProductCountryCode(product, seriesByName) {
   return normalizeCountryCode(foundSerie?.pais || foundSerie?.countryCode || "");
 }
 
-function isProductFromCurrentSection(product, title, subcategory) {
+function isProductFromCurrentSection(product, title, subcategory, personalizedRouteConfig) {
   const section = normalizeText(title);
   const tipo = normalizeText(getProductTypeText(product));
   const estado = normalizeText(product.estado || product.status || "");
@@ -207,6 +268,16 @@ function isProductFromCurrentSection(product, title, subcategory) {
   if (section.includes("personalizado")) {
     if (!subcategory) {
       return categoriaTexto.includes("personalizado") || tipo.includes("personalizado");
+    }
+
+    if (personalizedRouteConfig?.subcategoryName) {
+      const routeSubcategory = normalizeText(personalizedRouteConfig.subcategoryName);
+      const productSubcategory = normalizeText(getProductSubcategoryName(product));
+
+      return (
+        productSubcategory.includes(routeSubcategory) ||
+        categorySearchText.includes(routeSubcategory)
+      );
     }
 
     return (
@@ -272,7 +343,18 @@ function CatalogPage({ title = "Catálogo" }) {
 
   const isSeriesPage = title === "Series";
   const isPersonalizedPage = title === "Personalizados";
+  const personalizedRouteConfig = useMemo(
+    () => (isPersonalizedPage ? getPersonalizedRouteConfig(subcategory) : null),
+    [isPersonalizedPage, subcategory]
+  );
+  const routeDisplayLabel = useMemo(
+    () => getRouteDisplayLabel(subcategory),
+    [subcategory]
+  );
   const shouldShowStoryFilters = isSeriesPage || isPersonalizedPage;
+  const typeSearchPlaceholder = isPersonalizedPage
+    ? "Peluche, llavero, pin, mini stand..."
+    : "Stand, llavero, photocard...";
 
   const activeSeries = useMemo(() => {
     return (series || []).filter(isSerieVisiblePublic);
@@ -311,12 +393,16 @@ function CatalogPage({ title = "Catálogo" }) {
   const countryFromRoute = useMemo(() => {
     if (!subcategory) return "";
 
+    if (isPersonalizedPage && personalizedRouteConfig?.countryCode) {
+      return personalizedRouteConfig.countryCode;
+    }
+
     const foundCountry = countryFilters.find(
       (country) => country.pathValue === subcategory
     );
 
     return foundCountry?.code || "";
-  }, [subcategory]);
+  }, [isPersonalizedPage, personalizedRouteConfig, subcategory]);
 
   const currentCountry = countryFromRoute || selectedCountry;
 
@@ -386,9 +472,9 @@ function CatalogPage({ title = "Catálogo" }) {
 
   const sectionProducts = useMemo(() => {
     return publicProducts.filter((product) =>
-      isProductFromCurrentSection(product, title, subcategory)
+      isProductFromCurrentSection(product, title, subcategory, personalizedRouteConfig)
     );
-  }, [publicProducts, title, subcategory]);
+  }, [publicProducts, title, subcategory, personalizedRouteConfig]);
 
   const priceRange = useMemo(() => {
     return getDynamicPriceRange(sectionProducts);
@@ -508,7 +594,7 @@ function CatalogPage({ title = "Catálogo" }) {
           <p className="mt-3 text-gray-600">
             Estás viendo:{" "}
             <span className="font-bold capitalize">
-              {subcategory.replace("-", " ")}
+              {routeDisplayLabel}
             </span>
           </p>
         )}
@@ -576,7 +662,7 @@ function CatalogPage({ title = "Catálogo" }) {
                 value={typeSearch}
                 onChange={(event) => setTypeSearch(event.target.value)}
                 className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
-                placeholder="Stand, llavero, photocard..."
+                placeholder={typeSearchPlaceholder}
               />
             </label>
 
@@ -760,7 +846,7 @@ function CatalogPage({ title = "Catálogo" }) {
               {isSeriesPage
                 ? "Productos de las series"
                 : isPersonalizedPage && subcategory
-                ? `Productos de ${subcategory.replace("-", " ")}`
+                ? `Productos de ${routeDisplayLabel}`
                 : "Productos"}
             </h3>
 

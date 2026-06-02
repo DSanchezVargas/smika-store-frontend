@@ -52,7 +52,10 @@ export const mainNavigation = [
     path: "/personalizados",
     children: [
       { label: "Ver personalizados", path: "/personalizados" },
-      { label: "Gacha", path: "/personalizados/gacha" }
+      { label: "Gacha Japón", path: "/personalizados/gacha-japon" },
+      { label: "Gacha China", path: "/personalizados/gacha-china" },
+      { label: "Gacha Corea", path: "/personalizados/gacha-corea" },
+      { label: "Gacha variado", path: "/personalizados/gacha-variado" }
     ]
   }
 ];

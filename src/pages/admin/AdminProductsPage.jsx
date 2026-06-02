@@ -50,6 +50,7 @@ const initialForm = {
 };
 
 const baseProductTypes = [
+  "Gachapon",
   "Stand de acrílico",
   "Llavero",
   "Peluche",
