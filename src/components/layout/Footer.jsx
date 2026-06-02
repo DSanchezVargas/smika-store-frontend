@@ -1,17 +1,11 @@
 import { Link } from "react-router-dom";
 
 import { socialLinks } from "../../data/navigationData";
-import { getApiBaseUrl } from "../../services/api";
-
-function getBackendPublicUrl() {
-  return getApiBaseUrl().replace(/\/api\/?$/, "");
-}
 
 function getUploadAsset(path) {
-  const cleanBaseUrl = getBackendPublicUrl().replace(/\/$/, "");
   const cleanPath = path.startsWith("/") ? path : `/${path}`;
 
-  return `${cleanBaseUrl}${cleanPath}`;
+  return `${import.meta.env.BASE_URL.replace(/\/$/, "")}${cleanPath}`;
 }
 
 const socialItems = [
@@ -19,7 +13,7 @@ const socialItems = [
     label: "Instagram",
     shortLabel: "IG",
     href: socialLinks.instagram,
-    image: getUploadAsset("/public/Instagram.png"),
+    image: getUploadAsset("/Instagram.png"),
     gradient: "from-[#F7D9D8] via-[#ffffff] to-[#D1B0C7]",
     ring: "hover:ring-[#D1B0C7]/50",
     description: "Novedades y fotos"
@@ -28,7 +22,7 @@ const socialItems = [
     label: "TikTok",
     shortLabel: "TT",
     href: socialLinks.tiktok,
-    image: getUploadAsset("/public/Tiktok.png"),
+    image: getUploadAsset("/Tiktok.png"),
     gradient: "from-[#2F2F2F] via-[#ffffff] to-[#87CCC8]",
     ring: "hover:ring-[#87CCC8]/50",
     description: "Videos de productos"
@@ -37,7 +31,7 @@ const socialItems = [
     label: "WhatsApp",
     shortLabel: "WA",
     href: socialLinks.whatsappChannel,
-    image: getUploadAsset("/public/Whatsapp.png"),
+    image: getUploadAsset("/Whatsapp.png"),
     gradient: "from-[#87CCC8] via-[#ffffff] to-[#CDEDEA]",
     ring: "hover:ring-[#87CCC8]/50",
     description: "Canal de avisos"
