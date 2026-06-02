@@ -419,9 +419,11 @@ function AuthorSelector({
 function AdminSeriesPage() {
   const {
     series,
+    creators,
     loadingSeries,
     seriesLoadError,
     refreshSeries,
+    refreshCreators,
     createSeriesFull,
     updateSeriesFull
   } = useAdminData();
@@ -474,8 +476,10 @@ function AdminSeriesPage() {
   }, [series]);
 
   const authorOptions = useMemo(() => {
+    const registeredCreators = (creators || []).map((creator) => creator.nombre);
+
     const dynamicAuthors = (series || []).flatMap((serie) => {
-      const creators = Array.isArray(serie.creadoresNombre)
+      const seriesCreators = Array.isArray(serie.creadoresNombre)
         ? serie.creadoresNombre
         : [];
 
@@ -486,11 +490,11 @@ function AdminSeriesPage() {
             .filter(Boolean)
         : [];
 
-      return [...creators, ...authorText];
+      return [...seriesCreators, ...authorText];
     });
 
-    return uniqueTextOptions(dynamicAuthors);
-  }, [series]);
+    return uniqueTextOptions([...registeredCreators, ...dynamicAuthors]);
+  }, [creators, series]);
 
   const coverPreviewImages = useMemo(() => {
     return coverImages.map(getImageSource).filter(Boolean);
@@ -681,7 +685,7 @@ function AdminSeriesPage() {
       }
 
       resetForm();
-      await refreshSeries?.();
+      await Promise.all([refreshSeries?.(), refreshCreators?.()]);
     } catch (error) {
       setMessage(error.message || "No se pudo guardar la serie.");
     } finally {

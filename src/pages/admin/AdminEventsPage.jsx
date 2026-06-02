@@ -85,6 +85,16 @@ function normalizeText(text = "") {
     .trim();
 }
 
+function isMongoObjectId(value = "") {
+  return /^[a-f0-9]{24}$/i.test(value.toString().trim());
+}
+
+function isReadableSeriesName(value = "") {
+  const cleanValue = value.toString().trim();
+
+  return Boolean(cleanValue) && !isMongoObjectId(cleanValue);
+}
+
 function uniqueTexts(values = []) {
   return values.reduce((accumulator, value) => {
     const cleanValue = value?.toString().trim();
@@ -365,7 +375,7 @@ function getEventSeriesNames(event) {
     ...fromSeriesNombre,
     ...fromSeriesObjects,
     legacySerie
-  ]);
+  ]).filter(isReadableSeriesName);
 }
 
 function getEventProductIds(event) {
@@ -655,7 +665,9 @@ function AdminEventsPage() {
   }, [events, managedEventTypes]);
 
   const seriesOptions = useMemo(() => {
-    return activeSeries.map(buildOption);
+    return activeSeries
+      .filter((serie) => isReadableSeriesName(getName(serie)))
+      .map(buildOption);
   }, [activeSeries]);
 
   const coverPreviewImages = useMemo(() => {
@@ -950,7 +962,9 @@ function AdminEventsPage() {
   };
 
   const ensureSeriesExist = async () => {
-    const selectedSeriesNames = uniqueTexts(form.seriesNombre);
+    const selectedSeriesNames = uniqueTexts(form.seriesNombre).filter(
+      isReadableSeriesName
+    );
 
     const resolvedSeries = [];
 
@@ -1425,7 +1439,7 @@ function AdminEventsPage() {
                 onChange={(values) =>
                   setForm((currentForm) => ({
                     ...currentForm,
-                    seriesNombre: uniqueTexts(values)
+                    seriesNombre: uniqueTexts(values).filter(isReadableSeriesName)
                   }))
                 }
                 onCreate={handleSimpleCreatableCreate}

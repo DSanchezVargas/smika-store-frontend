@@ -51,9 +51,9 @@ import {
 
 const AdminDataContext = createContext(null);
 
-const LEGACY_STORAGE_KEYS = ["smika_admin_data_v1", "smika_admin_data_cache_v2"];
-const CATALOG_CACHE_KEY = "smika_public_catalog_cache_v4";
-const CACHE_VERSION = 4;
+const LEGACY_STORAGE_KEYS = ["smika_admin_data_v1", "smika_admin_data_cache_v2", "smika_public_catalog_cache_v4"];
+const CATALOG_CACHE_KEY = "smika_public_catalog_cache_v5";
+const CACHE_VERSION = 5;
 const CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
 const CACHE_MAX_BYTES = 1800000;
 
@@ -355,6 +355,12 @@ function normalizeText(text = "") {
 
 function isMongoObjectId(value) {
   return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
+}
+
+function isReadableLabel(value = "") {
+  const cleanValue = value.toString().trim();
+
+  return Boolean(cleanValue) && !isMongoObjectId(cleanValue);
 }
 
 function getId(item) {
@@ -846,7 +852,7 @@ function normalizeEventFromApi(event = {}) {
     ...normalizeArrayText(event.serieNombre),
     ...normalizeArrayText(event.series),
     ...normalizeArrayText(event.serie)
-  ]);
+  ]).filter(isReadableLabel);
 
   const seriesIds = Array.isArray(event.series)
     ? event.series
@@ -1165,7 +1171,7 @@ function buildEventPayloadForApi(payload = {}, options = {}) {
     ...normalizeArrayText(payload.seriesNombre),
     ...normalizeArrayText(payload.serieNombre),
     ...normalizeArrayText(payload.serie)
-  ]);
+  ]).filter(isReadableLabel);
 
   const categoryValue = payload.categoria || payload.categoriaNombre || "";
   const originValue = payload.origen || payload.origenNombre || payload.pais || "";
@@ -1298,7 +1304,9 @@ export function AdminDataProvider({ children }) {
 
     try {
       const data = await apiGetSeries();
-      const list = pickList(data, ["series", "items"]).map(normalizeSeriesFromApi);
+      const list = pickList(data, ["series", "items"])
+        .map(normalizeSeriesFromApi)
+        .filter((serie) => isReadableLabel(serie.nombre));
 
       updateCollection("series", list);
 
