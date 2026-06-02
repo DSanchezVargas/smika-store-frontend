@@ -51,10 +51,11 @@ import {
 
 const AdminDataContext = createContext(null);
 
-const STORAGE_KEY = "smika_admin_data_cache_v2";
-const OLD_STORAGE_KEY = "smika_admin_data_v1";
-const CACHE_VERSION = 2;
+const LEGACY_STORAGE_KEYS = ["smika_admin_data_v1", "smika_admin_data_cache_v2"];
+const CATALOG_CACHE_KEY = "smika_public_catalog_cache_v4";
+const CACHE_VERSION = 4;
 const CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
+const CACHE_MAX_BYTES = 1800000;
 
 const defaultAdminData = {
   products: [],
@@ -67,6 +68,7 @@ const defaultAdminData = {
   users: []
 };
 
+
 function hasMeaningfulData(data = {}) {
   return Object.keys(defaultAdminData).some((key) => {
     const value = data?.[key];
@@ -75,66 +77,158 @@ function hasMeaningfulData(data = {}) {
   });
 }
 
-function compactImageValueForCache(image) {
-  const imageSource = getImageSource(image);
+function isCacheableImageSource(source = "") {
+  if (!source || typeof source !== "string") return false;
 
-  if (!imageSource) return "";
+  const cleanSource = source.trim();
 
-  if (imageSource.startsWith("data:") && imageSource.length > 150000) {
-    return "";
-  }
+  if (!cleanSource) return false;
 
-  return imageSource;
+  if (cleanSource.startsWith("data:")) return false;
+
+  return cleanSource.length < 1200;
 }
 
 function compactImagesForCache(images = []) {
   if (!Array.isArray(images)) return [];
 
+  const seenImages = new Set();
+
   return images
-    .map(compactImageValueForCache)
-    .filter(Boolean)
-    .slice(0, 4);
+    .map(getImageSource)
+    .filter(isCacheableImageSource)
+    .filter((image) => {
+      if (seenImages.has(image)) return false;
+      seenImages.add(image);
+      return true;
+    })
+    .slice(0, 2);
 }
 
-function compactItemForCache(item = {}) {
-  if (!item || typeof item !== "object") return item;
+function compactTextForCache(value = "", maxLength = 220) {
+  const text = value === undefined || value === null ? "" : value.toString();
 
-  const compactItem = {
-    ...item
+  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
+}
+
+function compactVariantsForCache(variants = []) {
+  if (!Array.isArray(variants)) return [];
+
+  return variants
+    .map((variant, index) => ({
+      codigo: compactTextForCache(variant?.codigo || variant?.code || `opcion-${index + 1}`, 60),
+      nombre: compactTextForCache(variant?.nombre || variant?.name || `Opción ${index + 1}`, 90),
+      precio: Number(variant?.precio ?? variant?.price ?? 0),
+      stock: Number(variant?.stock || 0),
+      activa: variant?.activa !== false,
+      orden: Number(variant?.orden ?? index)
+    }))
+    .filter((variant) => variant.nombre)
+    .slice(0, 20);
+}
+
+function compactProductForCache(product = {}) {
+  const images = compactImagesForCache(product.imagenes || []);
+  const mainImage = getImageSource(product.imagen || product.image || product.cover);
+
+  return {
+    id: product.id || product._id || "",
+    _id: product._id || product.id || "",
+    nombre: compactTextForCache(product.nombre || product.name || "Producto Smika", 140),
+    slug: compactTextForCache(product.slug || "", 140),
+    descripcion: compactTextForCache(product.descripcion || product.description || "", 260),
+    precio: Number(product.precio ?? product.price ?? product.precioReferencial ?? 0),
+    price: Number(product.price ?? product.precio ?? product.precioReferencial ?? 0),
+    precioReferencial: Number(product.precioReferencial ?? product.precio ?? product.price ?? 0),
+    precioAnterior:
+      product.precioAnterior !== undefined && product.precioAnterior !== null
+        ? Number(product.precioAnterior)
+        : null,
+    categoria: compactTextForCache(product.categoria || product.categoriaNombre || "", 120),
+    categoriaId: product.categoriaId || "",
+    categoriaNombre: compactTextForCache(product.categoriaNombre || product.categoria || "", 120),
+    subcategoria: compactTextForCache(product.subcategoria || product.subcategoriaNombre || "", 120),
+    subcategoriaId: product.subcategoriaId || "",
+    subcategoriaNombre: compactTextForCache(product.subcategoriaNombre || product.subcategoria || "", 120),
+    serie: compactTextForCache(product.serie || product.serieNombre || "", 140),
+    serieNombre: compactTextForCache(product.serieNombre || product.serie || "", 140),
+    evento: compactTextForCache(product.evento || product.eventoNombre || "", 140),
+    eventoNombre: compactTextForCache(product.eventoNombre || product.evento || "", 140),
+    origen: compactTextForCache(product.origen || product.origenNombre || "", 120),
+    origenNombre: compactTextForCache(product.origenNombre || product.origen || product.pais || "", 120),
+    pais: compactTextForCache(product.pais || product.origenNombre || "", 120),
+    tipo: compactTextForCache(product.tipo || product.tipoProducto || "Producto", 140),
+    tipoProducto: compactTextForCache(product.tipoProducto || product.tipo || "Producto", 140),
+    tiposProducto: Array.isArray(product.tiposProducto)
+      ? product.tiposProducto.map((item) => compactTextForCache(item, 80)).slice(0, 8)
+      : [],
+    personaje: compactTextForCache(product.personaje || product.personajeNombre || "", 140),
+    personajeNombre: compactTextForCache(product.personajeNombre || product.personaje || "", 140),
+    personajesNombre: Array.isArray(product.personajesNombre)
+      ? product.personajesNombre.map((item) => compactTextForCache(item, 90)).slice(0, 10)
+      : [],
+    varianteTipo: normalizeVariantMode(product.varianteTipo || product.tipoVariante),
+    variantes: compactVariantsForCache(product.variantes || product.variants || []),
+    stock: Number(product.stock || 0),
+    tiempoEstimado: compactTextForCache(product.tiempoEstimado || "", 120),
+    estado: product.estado || "Activo",
+    disponibilidad: product.disponibilidad || "stock",
+    adulto: Boolean(product.adulto),
+    esNuevo: Boolean(product.esNuevo),
+    esDestacado: Boolean(product.esDestacado),
+    activo: product.activo !== false,
+    imagen: isCacheableImageSource(mainImage) ? mainImage : images[0] || "",
+    imagenes: images
   };
+}
 
-  if (Array.isArray(compactItem.imagenes)) {
-    compactItem.imagenes = compactImagesForCache(compactItem.imagenes);
+function compactBasicItemForCache(item = {}, imageFields = ["imagen", "cover", "portada"]) {
+  const imageSources = [];
+
+  imageFields.forEach((field) => {
+    const source = getImageSource(item?.[field]);
+    if (isCacheableImageSource(source)) imageSources.push(source);
+  });
+
+  if (Array.isArray(item?.imagenes)) {
+    imageSources.push(...compactImagesForCache(item.imagenes));
   }
 
-  const mainImage = compactImageValueForCache(
-    compactItem.imagen || compactItem.image || compactItem.cover
-  );
+  const image = imageSources.find(Boolean) || "";
 
-  if (mainImage) {
-    compactItem.imagen = mainImage;
-  } else if (compactItem.imagen?.startsWith?.("data:")) {
-    compactItem.imagen = "";
-  }
-
-  return compactItem;
+  return {
+    id: item.id || item._id || "",
+    _id: item._id || item.id || "",
+    nombre: compactTextForCache(item.nombre || item.titulo || item.name || "", 140),
+    titulo: compactTextForCache(item.titulo || item.nombre || item.name || "", 140),
+    slug: compactTextForCache(item.slug || "", 140),
+    descripcion: compactTextForCache(item.descripcion || item.description || "", 220),
+    imagen: image,
+    imagenes: image ? [image] : [],
+    pais: compactTextForCache(item.pais || item.origenNombre || item.code || "", 80),
+    origenNombre: compactTextForCache(item.origenNombre || item.pais || "", 80),
+    categoriaNombre: compactTextForCache(item.categoriaNombre || item.categoria || "", 100),
+    tipo: compactTextForCache(item.tipo || item.tipoProducto || "", 100),
+    estado: item.estado || "Activo",
+    activo: item.activo !== false
+  };
 }
 
 function compactAdminDataForCache(data = defaultAdminData) {
   return {
     ...defaultAdminData,
-    products: (data.products || []).map(compactItemForCache),
-    events: (data.events || []).map(compactItemForCache),
-    series: (data.series || []).map(compactItemForCache),
-    characters: (data.characters || []).map(compactItemForCache),
-    categories: (data.categories || []).map(compactItemForCache),
-    creators: (data.creators || []).map(compactItemForCache),
-    origins: (data.origins || []).map(compactItemForCache),
+    products: (data.products || []).map(compactProductForCache).slice(0, 300),
+    events: (data.events || []).map((item) => compactBasicItemForCache(item, ["imagen", "cover", "poster"])) .slice(0, 100),
+    series: (data.series || []).map((item) => compactBasicItemForCache(item, ["imagen", "portada", "cover"])).slice(0, 200),
+    characters: (data.characters || []).map((item) => compactBasicItemForCache(item, ["imagen", "avatar", "cover"])).slice(0, 250),
+    categories: (data.categories || []).map((item) => compactBasicItemForCache(item, ["imagen", "cover"])).slice(0, 120),
+    creators: (data.creators || []).map((item) => compactBasicItemForCache(item, ["imagen", "avatar"])).slice(0, 120),
+    origins: (data.origins || []).map((item) => compactBasicItemForCache(item, ["imagen", "bandera", "flag"])).slice(0, 80),
     users: []
   };
 }
 
-function readCachedAdminData() {
+function readCachedCatalogData() {
   if (typeof window === "undefined") {
     return {
       data: defaultAdminData,
@@ -144,7 +238,7 @@ function readCachedAdminData() {
   }
 
   try {
-    const rawValue = window.localStorage.getItem(STORAGE_KEY);
+    const rawValue = window.localStorage.getItem(CATALOG_CACHE_KEY);
 
     if (!rawValue) {
       return {
@@ -190,16 +284,53 @@ function readCachedAdminData() {
   }
 }
 
-function writeCachedAdminData(data = defaultAdminData) {
-  if (typeof window === "undefined" || !hasMeaningfulData(data)) return;
+function writeCachedCatalogData(data = defaultAdminData) {
+  if (typeof window === "undefined" || !hasMeaningfulData(data)) {
+    return {
+      ok: false,
+      cachedAt: null,
+      reason: "empty"
+    };
+  }
 
-  const payload = {
-    version: CACHE_VERSION,
-    cachedAt: Date.now(),
-    data: compactAdminDataForCache(data)
-  };
+  try {
+    const payload = {
+      version: CACHE_VERSION,
+      cachedAt: Date.now(),
+      data: compactAdminDataForCache(data)
+    };
 
-  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    const serialized = JSON.stringify(payload);
+
+    if (serialized.length > CACHE_MAX_BYTES) {
+      window.localStorage.removeItem(CATALOG_CACHE_KEY);
+      return {
+        ok: false,
+        cachedAt: null,
+        reason: "too_large"
+      };
+    }
+
+    window.localStorage.setItem(CATALOG_CACHE_KEY, serialized);
+
+    return {
+      ok: true,
+      cachedAt: payload.cachedAt,
+      reason: "saved"
+    };
+  } catch (error) {
+    try {
+      window.localStorage.removeItem(CATALOG_CACHE_KEY);
+    } catch {
+      // No es crítico: la tienda puede seguir funcionando sin caché local.
+    }
+
+    return {
+      ok: false,
+      cachedAt: null,
+      reason: error?.name || "storage_error"
+    };
+  }
 }
 
 function createSlug(text = "") {
@@ -443,6 +574,73 @@ function normalizeCharacterFromApi(character = {}) {
   };
 }
 
+
+function createVariantCode(text = "", index = 0) {
+  const slug = text
+    .toString()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+
+  return slug || `opcion-${index + 1}`;
+}
+
+function normalizeVariantMode(value = "sin_variantes") {
+  const cleanValue = normalizeText(value || "sin_variantes");
+
+  if (["precio_igual", "igual", "mismo_precio", "same_price"].includes(cleanValue)) {
+    return "precio_igual";
+  }
+
+  if (["precio_diferente", "diferente", "precio_variable", "different_price"].includes(cleanValue)) {
+    return "precio_diferente";
+  }
+
+  return "sin_variantes";
+}
+
+function normalizeProductVariants(value = [], basePrice = 0, mode = "sin_variantes") {
+  if (!Array.isArray(value)) return [];
+
+  const seenCodes = new Set();
+  const normalizedMode = normalizeVariantMode(mode);
+
+  return value
+    .map((variant, index) => {
+      const nombre = getName(variant, variant?.nombre || variant?.name || "").trim();
+
+      if (!nombre) return null;
+
+      const rawCode = variant?.codigo || variant?.code || variant?.id || createVariantCode(nombre, index);
+      let codigo = rawCode.toString().trim() || createVariantCode(nombre, index);
+
+      while (seenCodes.has(codigo)) {
+        codigo = `${codigo}-${index + 1}`;
+      }
+
+      seenCodes.add(codigo);
+
+      const priceValue =
+        normalizedMode === "precio_diferente"
+          ? Number(variant?.precio ?? variant?.price ?? variant?.precioReferencial ?? 0)
+          : Number(basePrice || 0);
+
+      return {
+        codigo,
+        nombre,
+        precio: priceValue,
+        stock: Number(variant?.stock || 0),
+        activa: variant?.activa !== undefined ? Boolean(variant.activa) : true,
+        orden: Number(variant?.orden ?? index)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
+}
+
 function normalizeProductFromApi(product = {}) {
   const mongoId = getId(product);
 
@@ -538,6 +736,13 @@ function normalizeProductFromApi(product = {}) {
     precio,
     price: precio,
     precioReferencial: precio,
+
+    varianteTipo: normalizeVariantMode(product.varianteTipo || product.tipoVariante),
+    variantes: normalizeProductVariants(
+      product.variantes || product.variants || [],
+      precio,
+      product.varianteTipo || product.tipoVariante
+    ),
 
     stock: Number(product.stock || 0),
     tiempoEstimado: product.tiempoEstimado || "",
@@ -837,6 +1042,13 @@ function buildProductPayloadForApi(payload = {}, options = {}) {
     ),
     price: Number(payload.price ?? payload.precio ?? payload.precioReferencial ?? 0),
 
+    varianteTipo: normalizeVariantMode(payload.varianteTipo || payload.tipoVariante),
+    variantes: normalizeProductVariants(
+      payload.variantes || payload.variants || [],
+      Number(payload.precioReferencial ?? payload.precio ?? payload.price ?? 0),
+      payload.varianteTipo || payload.tipoVariante
+    ),
+
     stock: Number(payload.stock || 0),
 
     disponibilidad: payload.disponibilidad || "stock",
@@ -1019,15 +1231,15 @@ function replaceItemById(collection = [], item) {
 }
 
 export function AdminDataProvider({ children }) {
-  const cachedAdminData = useMemo(() => readCachedAdminData(), []);
-  const [adminData, setAdminData] = useState(cachedAdminData.data);
+  const cachedCatalogData = useMemo(() => readCachedCatalogData(), []);
+  const [adminData, setAdminData] = useState(cachedCatalogData.data);
   const [storageError, setStorageError] = useState("");
-  const [hasCachedCatalog, setHasCachedCatalog] = useState(cachedAdminData.hasCache);
+  const [hasCachedCatalog, setHasCachedCatalog] = useState(cachedCatalogData.hasCache);
   const [catalogCacheTimestamp, setCatalogCacheTimestamp] = useState(
-    cachedAdminData.cachedAt
+    cachedCatalogData.cachedAt
   );
   const [initialDataLoaded, setInitialDataLoaded] = useState(
-    cachedAdminData.hasCache
+    cachedCatalogData.hasCache
   );
   const [refreshingAdminData, setRefreshingAdminData] = useState(false);
 
@@ -1216,7 +1428,7 @@ export function AdminDataProvider({ children }) {
     setRefreshingAdminData(true);
 
     try {
-      await Promise.allSettled([
+      await Promise.all([
         refreshProducts(),
         refreshSeries(),
         refreshEvents(),
@@ -1236,28 +1448,30 @@ export function AdminDataProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    try {
-      localStorage.removeItem(OLD_STORAGE_KEY);
-      setStorageError("");
-    } catch (error) {
-      console.error("No se pudo limpiar el almacenamiento local antiguo.", error);
-    }
+    if (typeof window === "undefined") return;
+
+    LEGACY_STORAGE_KEYS.forEach((key) => {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        // No es crítico. El navegador puede bloquear limpieza, pero la tienda sigue funcionando.
+      }
+    });
+
+    setStorageError("");
   }, []);
 
   useEffect(() => {
     if (!hasMeaningfulData(adminData)) return;
 
-    try {
-      writeCachedAdminData(adminData);
+    const result = writeCachedCatalogData(adminData);
+
+    if (result.ok) {
       setHasCachedCatalog(true);
-      setCatalogCacheTimestamp(Date.now());
-      setStorageError("");
-    } catch (error) {
-      console.error("No se pudo guardar la caché local del catálogo.", error);
-      setStorageError(
-        "No se pudo guardar una copia local del catálogo. La tienda seguirá funcionando, pero puede tardar más al abrir."
-      );
+      setCatalogCacheTimestamp(result.cachedAt);
     }
+
+    setStorageError("");
   }, [adminData]);
 
   const createProduct = async (payload) => {
