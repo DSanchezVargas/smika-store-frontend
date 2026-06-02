@@ -87,6 +87,10 @@ function CroppedImagePreview({
 
     const sourceImage = new window.Image();
 
+    if (!sourceSrc.startsWith("data:") && !sourceSrc.startsWith("blob:")) {
+      sourceImage.crossOrigin = "anonymous";
+    }
+
     sourceImage.onload = () => {
       const naturalWidth = sourceImage.naturalWidth;
       const naturalHeight = sourceImage.naturalHeight;
@@ -126,7 +130,13 @@ function CroppedImagePreview({
         canvas.height
       );
 
-      setCroppedSrc(canvas.toDataURL("image/jpeg", 0.92));
+      try {
+        setCroppedSrc(canvas.toDataURL("image/jpeg", 0.92));
+      } catch {
+        // Algunas imágenes externas no permiten exportar canvas por CORS.
+        // En ese caso se muestra la imagen original para no romper el panel.
+        setCroppedSrc(sourceSrc);
+      }
     };
 
     sourceImage.onerror = () => {
