@@ -551,14 +551,6 @@ function CatalogPage({ title = "Catálogo" }) {
     });
   }, [events, isEventsPage, sectionProducts]);
 
-  const selectedEventOption = useMemo(() => {
-    if (!selectedEvent) return null;
-
-    return eventOptions.find(
-      (eventOption) => normalizeText(eventOption.nombre) === normalizeText(selectedEvent)
-    );
-  }, [eventOptions, selectedEvent]);
-
   const priceRange = useMemo(() => {
     return getDynamicPriceRange(sectionProducts);
   }, [sectionProducts]);
@@ -706,14 +698,14 @@ function CatalogPage({ title = "Catálogo" }) {
 
         {isEventsPage && (
           <p className="mt-3 text-gray-600 max-w-3xl leading-7">
-            Revisa los productos agrupados por evento. Usa el filtro de evento
-            para ver solo los productos vinculados por la administradora.
+            Revisa los productos vinculados a eventos. Filtra desde la barra lateral
+            para ver un evento específico.
           </p>
         )}
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-        <aside className="smika-card p-5 h-fit">
+      <div className="grid items-start gap-6 lg:grid-cols-[minmax(240px,280px)_minmax(0,1fr)]">
+        <aside className="smika-card p-5 h-fit w-full max-w-full overflow-hidden">
           <div className="flex items-center gap-2">
             <SlidersHorizontal size={20} className="text-[#87CCC8]" />
             <h3 className="font-black text-lg">Filtros</h3>
@@ -725,7 +717,7 @@ function CatalogPage({ title = "Catálogo" }) {
               <select
                 value={availability}
                 onChange={(event) => setAvailability(event.target.value)}
-                className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
               >
                 <option value="Todos">Todos</option>
                 <option value="En stock">En stock</option>
@@ -765,7 +757,7 @@ function CatalogPage({ title = "Catálogo" }) {
               <input
                 value={typeSearch}
                 onChange={(event) => setTypeSearch(event.target.value)}
-                className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
                 placeholder={typeSearchPlaceholder}
               />
             </label>
@@ -776,7 +768,7 @@ function CatalogPage({ title = "Catálogo" }) {
                 <select
                   value={selectedEvent}
                   onChange={(event) => setSelectedEvent(event.target.value)}
-                  className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                  className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
                 >
                   <option value="">Todos los eventos</option>
 
@@ -807,7 +799,7 @@ function CatalogPage({ title = "Catálogo" }) {
                       setSelectedStory("");
                     }}
                     disabled={Boolean(countryFromRoute)}
-                    className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8] disabled:bg-gray-100"
+                    className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8] disabled:bg-gray-100"
                   >
                     <option value="">Todos</option>
 
@@ -824,7 +816,7 @@ function CatalogPage({ title = "Catálogo" }) {
                   <select
                     value={selectedStory}
                     onChange={(event) => setSelectedStory(event.target.value)}
-                    className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                    className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
                   >
                     <option value="">Todas</option>
 
@@ -843,7 +835,7 @@ function CatalogPage({ title = "Catálogo" }) {
                       <select
                         value={selectedGenre}
                         onChange={(event) => setSelectedGenre(event.target.value)}
-                        className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                        className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
                       >
                         <option value="">Todos</option>
 
@@ -860,7 +852,7 @@ function CatalogPage({ title = "Catálogo" }) {
                       <select
                         value={selectedAuthor}
                         onChange={(event) => setSelectedAuthor(event.target.value)}
-                        className="rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
+                        className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 bg-white outline-none focus:border-[#87CCC8]"
                       >
                         <option value="">Todos</option>
 
@@ -878,72 +870,7 @@ function CatalogPage({ title = "Catálogo" }) {
           </div>
         </aside>
 
-        <div className="space-y-8">
-          {isEventsPage && (
-            <div className="rounded-[24px] border border-[#87CCC8]/20 bg-white/85 px-4 py-3 shadow-sm backdrop-blur">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-[#87CCC8]">
-                    Eventos disponibles
-                  </p>
-                  <h3 className="mt-1 text-lg font-black text-[#2F2F2F]">
-                    {selectedEventOption
-                      ? selectedEventOption.nombre
-                      : "Todos los eventos"}
-                  </h3>
-                </div>
-
-                {selectedEvent && (
-                  <button
-                    type="button"
-                    onClick={() => setSelectedEvent("")}
-                    className="rounded-full border border-[#F7D9D8] bg-[#F7D9D8]/45 px-4 py-2 text-xs font-black text-[#2F2F2F] transition hover:bg-[#F7D9D8]"
-                  >
-                    Limpiar filtro
-                  </button>
-                )}
-              </div>
-
-              {eventOptions.length > 0 ? (
-                <div className="mt-3 flex max-w-full gap-2 overflow-x-auto pb-1 pr-1">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedEvent("")}
-                    className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${
-                      !selectedEvent
-                        ? "bg-[#87CCC8] text-white shadow-sm"
-                        : "bg-[#F8F6F7] text-gray-700 hover:bg-[#F7D9D8]/70"
-                    }`}
-                  >
-                    Todos
-                  </button>
-
-                  {eventOptions.map((eventOption) => (
-                    <button
-                      key={eventOption.id || eventOption.nombre}
-                      type="button"
-                      onClick={() => setSelectedEvent(eventOption.nombre)}
-                      className={`shrink-0 rounded-full px-4 py-2 text-xs font-black transition ${
-                        normalizeText(selectedEvent) === normalizeText(eventOption.nombre)
-                          ? "bg-[#87CCC8] text-white shadow-sm"
-                          : "bg-[#F8F6F7] text-gray-700 hover:bg-[#F7D9D8]/70"
-                      }`}
-                    >
-                      <span className="align-middle">{eventOption.nombre}</span>
-                      <span className="ml-2 inline-flex min-w-5 justify-center rounded-full bg-white/70 px-2 py-0.5 text-[10px] text-[#2F2F2F]">
-                        {eventOption.productos}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-3 rounded-2xl bg-[#F8F6F7] px-4 py-3 text-sm font-bold text-gray-500">
-                  Aún no hay eventos activos registrados desde el panel admin.
-                </p>
-              )}
-            </div>
-          )}
-
+        <div className="min-w-0 space-y-8">
           {isSeriesPage && (
             <div>
               <div className="mb-5 flex items-center gap-2">
