@@ -5,10 +5,13 @@ import {
   Loader2,
   Pencil,
   Plus,
+  Filter,
   Power,
   RefreshCw,
   Save,
-  ShoppingBag
+  Search,
+  ShoppingBag,
+  X
 } from "lucide-react";
 
 import ImageDropzone from "../../components/admin/ImageDropzone";
@@ -29,7 +32,6 @@ const initialForm = {
   nombre: "",
   descripcion: "",
   categoriaNombre: "",
-  subcategoriaNombre: "",
   serieNombre: "",
   eventoNombre: "",
   origenNombre: "",
@@ -38,8 +40,6 @@ const initialForm = {
   personajesNombre: [],
   material: "",
   precio: "",
-  varianteTipo: "sin_variantes",
-  variantes: [],
   stock: "",
   tamano: "",
   disponibilidad: "stock",
@@ -52,11 +52,8 @@ const initialForm = {
 };
 
 const baseProductTypes = [
-  "Gachapon",
   "Stand de acrílico",
   "Llavero",
-  "Peluche",
-  "Mini stand",
   "Photocard",
   "Pin",
   "Sticker",
@@ -187,72 +184,6 @@ function normalizeTiposFromProduct(product) {
   ]);
 }
 
-
-function createVariantCode(text = "", index = 0) {
-  const slug = text
-    .toString()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/(^-|-$)+/g, "");
-
-  return slug || `opcion-${index + 1}`;
-}
-
-function createEmptyVariant(index = 0) {
-  return {
-    codigo: `opcion-${index + 1}`,
-    nombre: "",
-    precio: "",
-    stock: "",
-    activa: true,
-    orden: index
-  };
-}
-
-function normalizeVariantMode(value = "sin_variantes") {
-  const cleanValue = normalizeText(value || "sin_variantes");
-
-  if (["precio_igual", "igual", "mismo_precio", "same_price"].includes(cleanValue)) {
-    return "precio_igual";
-  }
-
-  if (["precio_diferente", "diferente", "precio_variable", "different_price"].includes(cleanValue)) {
-    return "precio_diferente";
-  }
-
-  return "sin_variantes";
-}
-
-function normalizeVariantsFromProduct(product) {
-  const mode = normalizeVariantMode(product?.varianteTipo || product?.tipoVariante);
-  const basePrice = getProductPrice(product);
-
-  if (!Array.isArray(product?.variantes)) return [];
-
-  return product.variantes
-    .map((variant, index) => {
-      const nombre = getName(variant, variant?.nombre || variant?.name || "").trim();
-
-      if (!nombre) return null;
-
-      return {
-        codigo: variant.codigo || variant.code || createVariantCode(nombre, index),
-        nombre,
-        precio:
-          mode === "precio_diferente"
-            ? Number(variant.precio ?? variant.price ?? 0)
-            : basePrice,
-        stock: variant.stock !== undefined ? Number(variant.stock || 0) : "",
-        activa: variant.activa !== false,
-        orden: Number(variant.orden ?? index)
-      };
-    })
-    .filter(Boolean);
-}
-
 function getProductType(product) {
   const tipos = normalizeTiposFromProduct(product);
 
@@ -265,21 +196,6 @@ function getProductCategoryName(product) {
     product?.categoriaNombre,
     product?.category
   );
-}
-
-function getProductSubcategoryName(product) {
-  if (product?.subcategoriaNombre) return product.subcategoriaNombre;
-  if (product?.subcategoryName) return product.subcategoryName;
-
-  if (product?.subcategoria && typeof product.subcategoria === "object") {
-    return getName(product.subcategoria);
-  }
-
-  if (product?.subcategory && typeof product.subcategory === "object") {
-    return getName(product.subcategory);
-  }
-
-  return product?.subcategory || product?.subcategoria || "";
 }
 
 function getProductSeriesName(product) {
@@ -628,6 +544,10 @@ function AdminProductsPage() {
   const [loadingAvailabilities, setLoadingAvailabilities] = useState(false);
   const [availabilitiesError, setAvailabilitiesError] = useState("");
 
+  const [productSearch, setProductSearch] = useState("");
+  const [seriesFilter, setSeriesFilter] = useState("all");
+  const [eventFilter, setEventFilter] = useState("all");
+
   const sortedProducts = useMemo(() => {
     return [...(products || [])].sort((a, b) => {
       if (a.activo !== b.activo) return a.activo ? -1 : 1;
@@ -638,44 +558,9 @@ function AdminProductsPage() {
   const categoryOptions = useMemo(() => {
     return (categories || [])
       .filter((category) => category.activa !== false && category.activo !== false)
-      .filter((category) => category.tipo !== "subcategoria")
       .map(buildOption)
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [categories]);
-
-  const selectedCategoryOption = useMemo(() => {
-    return getOptionByName(categoryOptions, form.categoriaNombre);
-  }, [categoryOptions, form.categoriaNombre]);
-
-  const subcategoryOptions = useMemo(() => {
-    const selectedCategoryId = getId(selectedCategoryOption);
-    const selectedCategoryName = selectedCategoryOption?.nombre || form.categoriaNombre;
-
-    return (categories || [])
-      .filter((category) => category.activa !== false && category.activo !== false)
-      .filter((category) => category.tipo === "subcategoria")
-      .filter((category) => {
-        if (!selectedCategoryName) return true;
-
-        const parentId = getId(category.categoriaPadre);
-        const parentName = getRelatedName(
-          category.categoriaPadre,
-          category.categoriaPadreNombre
-        );
-
-        if (selectedCategoryId && parentId) {
-          return parentId === selectedCategoryId;
-        }
-
-        if (parentName) {
-          return normalizeText(parentName) === normalizeText(selectedCategoryName);
-        }
-
-        return true;
-      })
-      .map(buildOption)
-      .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
-  }, [categories, selectedCategoryOption, form.categoriaNombre]);
 
   const seriesOptions = useMemo(() => {
     return (series || [])
@@ -694,6 +579,64 @@ function AdminProductsPage() {
       }))
       .sort((a, b) => (a.nombre || "").localeCompare(b.nombre || ""));
   }, [events]);
+
+  const productSeriesFilterOptions = useMemo(() => {
+    return uniqueText([
+      ...seriesOptions.map((serie) => serie.nombre),
+      ...(products || []).map((product) => getProductSeriesName(product))
+    ])
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [products, seriesOptions]);
+
+  const productEventFilterOptions = useMemo(() => {
+    return uniqueText([
+      ...eventOptions.map((event) => event.nombre),
+      ...(products || []).map((product) => getProductEventName(product))
+    ])
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
+  }, [products, eventOptions]);
+
+  const filteredProducts = useMemo(() => {
+    const cleanSearch = normalizeText(productSearch);
+
+    return sortedProducts.filter((product) => {
+      const productSeriesName = getProductSeriesName(product);
+      const productEventName = getProductEventName(product);
+
+      const matchesSearch =
+        !cleanSearch ||
+        [
+          product.nombre,
+          getProductCategoryName(product),
+          getProductSubcategoryName(product),
+          getProductType(product),
+          productSeriesName,
+          productEventName,
+          getProductOriginName(product)
+        ].some((value) => normalizeText(value || "").includes(cleanSearch));
+
+      const matchesSeries =
+        seriesFilter === "all" ||
+        normalizeText(productSeriesName) === normalizeText(seriesFilter);
+
+      const matchesEvent =
+        eventFilter === "all" ||
+        normalizeText(productEventName) === normalizeText(eventFilter);
+
+      return matchesSearch && matchesSeries && matchesEvent;
+    });
+  }, [sortedProducts, productSearch, seriesFilter, eventFilter]);
+
+  const hasActiveProductFilters =
+    Boolean(productSearch.trim()) || seriesFilter !== "all" || eventFilter !== "all";
+
+  const clearProductFilters = () => {
+    setProductSearch("");
+    setSeriesFilter("all");
+    setEventFilter("all");
+  };
 
   const originOptions = useMemo(() => {
     return (origins || [])
@@ -931,7 +874,6 @@ function AdminProductsPage() {
       nombre: product.nombre || "",
       descripcion: product.descripcion || "",
       categoriaNombre: getProductCategoryName(product),
-      subcategoriaNombre: getProductSubcategoryName(product),
       serieNombre: getProductSeriesName(product),
       eventoNombre: getProductEventName(product),
       origenNombre: getProductOriginName(product),
@@ -940,8 +882,6 @@ function AdminProductsPage() {
       personajesNombre: normalizePersonajesFromProduct(product),
       material: product.material || "",
       precio: getProductPrice(product),
-      varianteTipo: normalizeVariantMode(product.varianteTipo || product.tipoVariante),
-      variantes: normalizeVariantsFromProduct(product),
       stock: product.stock !== undefined ? Number(product.stock || 0) : "",
       tamano: product.tamano || "",
       disponibilidad: product.disponibilidad || "stock",
@@ -986,73 +926,6 @@ function AdminProductsPage() {
       ...currentForm,
       disponibilidad: option.value,
       estado: option.estado || currentForm.estado || "Activo"
-    }));
-  };
-
-
-  const handleVariantModeChange = (value) => {
-    setForm((currentForm) => {
-      const nextMode = normalizeVariantMode(value);
-      const currentVariants = Array.isArray(currentForm.variantes)
-        ? currentForm.variantes
-        : [];
-
-      return {
-        ...currentForm,
-        varianteTipo: nextMode,
-        variantes:
-          nextMode === "sin_variantes"
-            ? []
-            : currentVariants.length > 0
-              ? currentVariants
-              : [createEmptyVariant(0), createEmptyVariant(1)]
-      };
-    });
-  };
-
-  const handleAddVariant = () => {
-    setForm((currentForm) => {
-      const currentVariants = Array.isArray(currentForm.variantes)
-        ? currentForm.variantes
-        : [];
-
-      return {
-        ...currentForm,
-        varianteTipo:
-          currentForm.varianteTipo === "sin_variantes"
-            ? "precio_igual"
-            : currentForm.varianteTipo,
-        variantes: [...currentVariants, createEmptyVariant(currentVariants.length)]
-      };
-    });
-  };
-
-  const handleVariantChange = (index, field, value) => {
-    setForm((currentForm) => {
-      const nextVariants = [...(currentForm.variantes || [])];
-      const currentVariant = nextVariants[index] || createEmptyVariant(index);
-
-      nextVariants[index] = {
-        ...currentVariant,
-        [field]: field === "activa" ? Boolean(value) : value,
-        codigo:
-          field === "nombre"
-            ? createVariantCode(value, index)
-            : currentVariant.codigo || createVariantCode(currentVariant.nombre, index),
-        orden: index
-      };
-
-      return {
-        ...currentForm,
-        variantes: nextVariants
-      };
-    });
-  };
-
-  const handleRemoveVariant = (index) => {
-    setForm((currentForm) => ({
-      ...currentForm,
-      variantes: (currentForm.variantes || []).filter((_, itemIndex) => itemIndex !== index)
     }));
   };
 
@@ -1227,72 +1100,6 @@ function AdminProductsPage() {
     };
   };
 
-  const ensureSubcategoryExists = async (category) => {
-    const subcategoryName = form.subcategoriaNombre.trim();
-
-    if (!subcategoryName) {
-      return {
-        id: "",
-        nombre: ""
-      };
-    }
-
-    const existingSubcategory = (categories || [])
-      .filter((item) => item.activa !== false && item.activo !== false)
-      .filter((item) => item.tipo === "subcategoria")
-      .find((item) => {
-        if (normalizeText(item.nombre) !== normalizeText(subcategoryName)) {
-          return false;
-        }
-
-        const parentId = getId(item.categoriaPadre);
-        const parentName = getRelatedName(
-          item.categoriaPadre,
-          item.categoriaPadreNombre
-        );
-
-        if (category?.id && parentId) {
-          return parentId === category.id;
-        }
-
-        if (category?.nombre && parentName) {
-          return normalizeText(parentName) === normalizeText(category.nombre);
-        }
-
-        return true;
-      });
-
-    if (existingSubcategory) {
-      return {
-        id: existingSubcategory._id || existingSubcategory.id,
-        nombre: existingSubcategory.nombre
-      };
-    }
-
-    if (!createCategoryFull) {
-      return {
-        id: "",
-        nombre: subcategoryName
-      };
-    }
-
-    const createdSubcategory = await createCategoryFull({
-      nombre: subcategoryName,
-      descripcion: `Subcategoría creada rápidamente desde productos para ${category?.nombre || "la categoría seleccionada"}.`,
-      tipo: "subcategoria",
-      categoriaPadre: category?.id || "",
-      orden: 0,
-      activa: true
-    });
-
-    await refreshCategories?.();
-
-    return {
-      id: createdSubcategory._id || createdSubcategory.id,
-      nombre: createdSubcategory.nombre
-    };
-  };
-
   const ensureOriginExists = async () => {
     const originName = form.origenNombre.trim() || "Variado";
     const existingOrigin = getOptionByName(originOptions, originName);
@@ -1431,7 +1238,6 @@ function AdminProductsPage() {
 
   const buildPayload = async () => {
     const category = await ensureCategoryExists();
-    const subcategory = await ensureSubcategoryExists(category);
     const origin = await ensureOriginExists();
     const serie = await ensureSeriesExists(origin);
     const event = await ensureEventExists({ origin, serie });
@@ -1449,10 +1255,6 @@ function AdminProductsPage() {
       categoriaId: category.id,
       categoria: category.id,
       categoriaNombre: category.nombre,
-
-      subcategoriaId: subcategory.id,
-      subcategoria: subcategory.id || subcategory.nombre,
-      subcategoriaNombre: subcategory.nombre || form.subcategoriaNombre.trim(),
 
       serieId: serie.id,
       serie: serie.id || serie.nombre,
@@ -1477,23 +1279,6 @@ function AdminProductsPage() {
       precio: Number(form.precio || 0),
       precioReferencial: Number(form.precio || 0),
       price: Number(form.precio || 0),
-      varianteTipo: normalizeVariantMode(form.varianteTipo),
-      variantes:
-        normalizeVariantMode(form.varianteTipo) === "sin_variantes"
-          ? []
-          : (form.variantes || [])
-              .map((variant, index) => ({
-                codigo: variant.codigo || createVariantCode(variant.nombre, index),
-                nombre: variant.nombre?.toString().trim() || "",
-                precio:
-                  normalizeVariantMode(form.varianteTipo) === "precio_diferente"
-                    ? Number(variant.precio || 0)
-                    : Number(form.precio || 0),
-                stock: Number(variant.stock || 0),
-                activa: variant.activa !== false,
-                orden: index
-              }))
-              .filter((variant) => variant.nombre),
       stock: Number(form.stock || 0),
       tamano: form.tamano.trim(),
       disponibilidad: form.disponibilidad,
@@ -1537,28 +1322,6 @@ function AdminProductsPage() {
     if (Number(form.precio || 0) < 0) {
       setMessage("El precio no puede ser negativo.");
       return;
-    }
-
-    if (form.varianteTipo !== "sin_variantes") {
-      const activeVariants = (form.variantes || []).filter((variant) =>
-        variant.nombre?.toString().trim()
-      );
-
-      if (activeVariants.length === 0) {
-        setMessage("Agrega al menos una opción para este producto.");
-        return;
-      }
-
-      if (form.varianteTipo === "precio_diferente") {
-        const invalidVariant = activeVariants.find(
-          (variant) => variant.precio === "" || Number(variant.precio) < 0
-        );
-
-        if (invalidVariant) {
-          setMessage("Cada opción con precio diferente debe tener un precio válido.");
-          return;
-        }
-      }
     }
 
     if (Number(form.stock || 0) < 0) {
@@ -1805,8 +1568,7 @@ function AdminProductsPage() {
               onChange={(value) =>
                 setForm((currentForm) => ({
                   ...currentForm,
-                  categoriaNombre: value,
-                  subcategoriaNombre: ""
+                  categoriaNombre: value
                 }))
               }
               onCreate={handleSimpleCreatableCreate}
@@ -1816,28 +1578,6 @@ function AdminProductsPage() {
               emptyCreateLabel="Agregar categoría"
               createLabel={(name) => `Agregar “${name}” a categorías`}
               helperText="Si no existe, se creará y se guardará en MongoDB al guardar el producto."
-            />
-
-            <CreatableSelect
-              label="Subcategoría"
-              value={form.subcategoriaNombre}
-              onChange={(value) =>
-                setForm((currentForm) => ({
-                  ...currentForm,
-                  subcategoriaNombre: value
-                }))
-              }
-              onCreate={handleSimpleCreatableCreate}
-              options={subcategoryOptions}
-              placeholder="Gacha, packs personalizados..."
-              emptyLabel="Sin subcategoría"
-              emptyCreateLabel="Agregar subcategoría"
-              createLabel={(name) =>
-                `Agregar “${name}” como subcategoría de “${form.categoriaNombre.trim()}”`
-              }
-              disabled={!form.categoriaNombre.trim()}
-              disabledText="Selecciona primero una categoría principal."
-              helperText="Ejemplo recomendado: Categoría Personalizados > Subcategoría Gacha. Si no existe, se creará al guardar el producto."
             />
 
             <CreatableSelect
@@ -1936,112 +1676,6 @@ function AdminProductsPage() {
                 className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
               />
             </label>
-
-            <div className="grid gap-4 rounded-[28px] border border-[#87CCC8]/20 bg-white/80 p-5 lg:col-span-2">
-              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <p className="text-sm font-black text-[#2F2F2F]">Opciones del producto</p>
-                  <p className="mt-1 text-xs font-medium leading-5 text-gray-500">
-                    Úsalo para pins, gachas, llaveros o productos con Tipo A, B, C. Si no tiene opciones, déjalo como producto simple.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={handleAddVariant}
-                  className="inline-flex items-center justify-center gap-2 rounded-full bg-[#F7D9D8] px-4 py-2 text-xs font-black text-[#2F2F2F]"
-                >
-                  <Plus size={15} />
-                  Agregar opción
-                </button>
-              </div>
-
-              <div className="grid gap-2 md:grid-cols-3">
-                {[
-                  { value: "sin_variantes", label: "Sin opciones" },
-                  { value: "precio_igual", label: "Opciones mismo precio" },
-                  { value: "precio_diferente", label: "Opciones precio diferente" }
-                ].map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    onClick={() => handleVariantModeChange(option.value)}
-                    className={`rounded-2xl border px-4 py-3 text-sm font-black transition ${
-                      form.varianteTipo === option.value
-                        ? "border-[#87CCC8] bg-[#87CCC8] text-white"
-                        : "border-[#87CCC8]/25 bg-[#F8F6F7] text-[#2F2F2F]"
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-
-              {form.varianteTipo !== "sin_variantes" && (
-                <div className="grid gap-3">
-                  {(form.variantes || []).map((variant, index) => (
-                    <div
-                      key={`${variant.codigo || index}-${index}`}
-                      className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4 md:grid-cols-[1.2fr_0.8fr_0.8fr_auto] md:items-end"
-                    >
-                      <label className="grid gap-2 text-xs font-black">
-                        Nombre de opción
-                        <input
-                          value={variant.nombre}
-                          onChange={(event) =>
-                            handleVariantChange(index, "nombre", event.target.value)
-                          }
-                          className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                          placeholder={`Tipo ${String.fromCharCode(65 + index)}`}
-                        />
-                      </label>
-
-                      <label className="grid gap-2 text-xs font-black">
-                        Precio
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={
-                            form.varianteTipo === "precio_diferente"
-                              ? variant.precio
-                              : form.precio
-                          }
-                          onChange={(event) =>
-                            handleVariantChange(index, "precio", event.target.value)
-                          }
-                          disabled={form.varianteTipo !== "precio_diferente"}
-                          className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none disabled:bg-white/50 disabled:text-gray-400"
-                          placeholder="S/"
-                        />
-                      </label>
-
-                      <label className="grid gap-2 text-xs font-black">
-                        Stock opción
-                        <input
-                          type="number"
-                          min="0"
-                          value={variant.stock}
-                          onChange={(event) =>
-                            handleVariantChange(index, "stock", event.target.value)
-                          }
-                          className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
-                          placeholder="Opcional"
-                        />
-                      </label>
-
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveVariant(index)}
-                        className="rounded-full bg-white px-4 py-3 text-xs font-black text-red-500"
-                      >
-                        Quitar
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
 
             <label className="grid gap-2 text-sm font-black">
               Stock numérico
@@ -2266,6 +1900,84 @@ function AdminProductsPage() {
 
       {view === "list" && (
         <>
+          <div className="rounded-[32px] border border-[#87CCC8]/20 bg-white p-5 smika-shadow">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <p className="flex items-center gap-2 text-sm font-black text-[#87CCC8]">
+                  <Filter size={17} />
+                  Filtros rápidos
+                </p>
+                <h3 className="mt-1 text-2xl font-black text-[#2F2F2F]">
+                  Encuentra productos por serie o evento
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Evita buscar producto por producto. Puedes combinar búsqueda, serie y evento.
+                </p>
+              </div>
+
+              <div className="rounded-full bg-[#F8F6F7] px-4 py-2 text-sm font-black text-[#2F2F2F]">
+                Mostrando {filteredProducts.length} de {sortedProducts.length}
+              </div>
+            </div>
+
+            <div className="mt-5 grid gap-3 lg:grid-cols-[1.25fr_1fr_1fr_auto]">
+              <label className="grid gap-2 text-xs font-black text-[#2F2F2F]">
+                Buscar
+                <div className="flex items-center gap-2 rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3">
+                  <Search size={17} className="text-[#87CCC8]" />
+                  <input
+                    value={productSearch}
+                    onChange={(event) => setProductSearch(event.target.value)}
+                    className="w-full bg-transparent text-sm font-semibold outline-none"
+                    placeholder="Nombre, tipo, categoría..."
+                  />
+                </div>
+              </label>
+
+              <label className="grid gap-2 text-xs font-black text-[#2F2F2F]">
+                Serie / Historia
+                <select
+                  value={seriesFilter}
+                  onChange={(event) => setSeriesFilter(event.target.value)}
+                  className="w-full rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3 text-sm font-semibold outline-none"
+                >
+                  <option value="all">Todas las series</option>
+                  {productSeriesFilterOptions.map((seriesName) => (
+                    <option key={`serie-filter-${seriesName}`} value={seriesName}>
+                      {seriesName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="grid gap-2 text-xs font-black text-[#2F2F2F]">
+                Evento
+                <select
+                  value={eventFilter}
+                  onChange={(event) => setEventFilter(event.target.value)}
+                  className="w-full rounded-2xl border border-[#87CCC8]/30 bg-white px-4 py-3 text-sm font-semibold outline-none"
+                >
+                  <option value="all">Todos los eventos</option>
+                  {productEventFilterOptions.map((eventName) => (
+                    <option key={`event-filter-${eventName}`} value={eventName}>
+                      {eventName}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button
+                type="button"
+                onClick={clearProductFilters}
+                disabled={!hasActiveProductFilters}
+                className="inline-flex items-center justify-center gap-2 rounded-2xl bg-[#F7D9D8] px-5 py-3 text-sm font-black text-[#2F2F2F] disabled:cursor-not-allowed disabled:opacity-40 lg:self-end"
+              >
+                <X size={16} />
+                Limpiar
+              </button>
+            </div>
+          </div>
+
           {loadingProducts ? (
             <div className="rounded-[32px] bg-white p-8 text-center smika-shadow">
               <Loader2
@@ -2286,9 +1998,29 @@ function AdminProductsPage() {
                 Crea un producto para verlo en el catálogo.
               </p>
             </div>
+          ) : filteredProducts.length === 0 ? (
+            <div className="rounded-[32px] bg-white p-8 text-center smika-shadow">
+              <Search size={42} className="mx-auto text-[#87CCC8]" />
+
+              <h3 className="mt-4 text-2xl font-black">
+                No hay productos con esos filtros
+              </h3>
+
+              <p className="mt-2 text-gray-600">
+                Prueba cambiando la serie, el evento o la búsqueda.
+              </p>
+
+              <button
+                type="button"
+                onClick={clearProductFilters}
+                className="mt-5 rounded-full bg-[#F7D9D8] px-5 py-3 text-sm font-black"
+              >
+                Limpiar filtros
+              </button>
+            </div>
           ) : (
             <div className="grid gap-6 xl:grid-cols-3">
-              {sortedProducts.map((product) => {
+              {filteredProducts.map((product) => {
                 const firstImage = Array.isArray(product.imagenes)
                   ? product.imagenes[0]
                   : null;
@@ -2332,11 +2064,6 @@ function AdminProductsPage() {
                         <p>
                           <strong>Categoría:</strong>{" "}
                           {getProductCategoryName(product) || "Sin categoría"}
-                        </p>
-
-                        <p>
-                          <strong>Subcategoría:</strong>{" "}
-                          {getProductSubcategoryName(product) || "Sin subcategoría"}
                         </p>
 
                         <p>
