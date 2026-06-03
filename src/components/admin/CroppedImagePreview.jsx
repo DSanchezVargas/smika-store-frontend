@@ -61,11 +61,12 @@ function getBestImageSource(image, ignoreFinalPreview = false) {
   }
 
   return (
+    image.secure_url ||
     image.url ||
     image.preview ||
-    image.finalPreview ||
     image.src ||
     image.imagen ||
+    image.finalPreview ||
     ""
   );
 }
@@ -174,6 +175,7 @@ function CroppedImagePreview({
     };
   }, [
     image,
+    image?.secure_url,
     image?.url,
     image?.preview,
     image?.finalPreview,
