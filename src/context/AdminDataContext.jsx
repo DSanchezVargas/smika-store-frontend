@@ -51,11 +51,7 @@ import {
 
 const AdminDataContext = createContext(null);
 
-const LEGACY_STORAGE_KEYS = ["smika_admin_data_v1", "smika_admin_data_cache_v2", "smika_public_catalog_cache_v4"];
-const CATALOG_CACHE_KEY = "smika_public_catalog_cache_v5";
-const CACHE_VERSION = 5;
-const CACHE_MAX_AGE_MS = 1000 * 60 * 60 * 24;
-const CACHE_MAX_BYTES = 1800000;
+const STORAGE_KEY = "smika_admin_data_v1";
 
 const defaultAdminData = {
   products: [],
@@ -67,271 +63,6 @@ const defaultAdminData = {
   origins: [],
   users: []
 };
-
-
-function hasMeaningfulData(data = {}) {
-  return Object.keys(defaultAdminData).some((key) => {
-    const value = data?.[key];
-
-    return Array.isArray(value) && value.length > 0;
-  });
-}
-
-function isCacheableImageSource(source = "") {
-  if (!source || typeof source !== "string") return false;
-
-  const cleanSource = source.trim();
-
-  if (!cleanSource) return false;
-
-  if (cleanSource.startsWith("data:")) return false;
-
-  return cleanSource.length < 1200;
-}
-
-function compactImagesForCache(images = []) {
-  if (!Array.isArray(images)) return [];
-
-  const seenImages = new Set();
-
-  return images
-    .map(getImageSource)
-    .filter(isCacheableImageSource)
-    .filter((image) => {
-      if (seenImages.has(image)) return false;
-      seenImages.add(image);
-      return true;
-    })
-    .slice(0, 2);
-}
-
-function compactTextForCache(value = "", maxLength = 220) {
-  const text = value === undefined || value === null ? "" : value.toString();
-
-  return text.length > maxLength ? `${text.slice(0, maxLength)}...` : text;
-}
-
-function compactVariantsForCache(variants = []) {
-  if (!Array.isArray(variants)) return [];
-
-  return variants
-    .map((variant, index) => ({
-      codigo: compactTextForCache(variant?.codigo || variant?.code || `opcion-${index + 1}`, 60),
-      nombre: compactTextForCache(variant?.nombre || variant?.name || `Opción ${index + 1}`, 90),
-      precio: Number(variant?.precio ?? variant?.price ?? 0),
-      stock: Number(variant?.stock || 0),
-      activa: variant?.activa !== false,
-      orden: Number(variant?.orden ?? index)
-    }))
-    .filter((variant) => variant.nombre)
-    .slice(0, 20);
-}
-
-function compactProductForCache(product = {}) {
-  const images = compactImagesForCache(product.imagenes || []);
-  const mainImage = getImageSource(product.imagen || product.image || product.cover);
-
-  return {
-    id: product.id || product._id || "",
-    _id: product._id || product.id || "",
-    nombre: compactTextForCache(product.nombre || product.name || "Producto Smika", 140),
-    slug: compactTextForCache(product.slug || "", 140),
-    descripcion: compactTextForCache(product.descripcion || product.description || "", 260),
-    precio: Number(product.precio ?? product.price ?? product.precioReferencial ?? 0),
-    price: Number(product.price ?? product.precio ?? product.precioReferencial ?? 0),
-    precioReferencial: Number(product.precioReferencial ?? product.precio ?? product.price ?? 0),
-    precioAnterior:
-      product.precioAnterior !== undefined && product.precioAnterior !== null
-        ? Number(product.precioAnterior)
-        : null,
-    categoria: compactTextForCache(product.categoria || product.categoriaNombre || "", 120),
-    categoriaId: product.categoriaId || "",
-    categoriaNombre: compactTextForCache(product.categoriaNombre || product.categoria || "", 120),
-    subcategoria: compactTextForCache(product.subcategoria || product.subcategoriaNombre || "", 120),
-    subcategoriaId: product.subcategoriaId || "",
-    subcategoriaNombre: compactTextForCache(product.subcategoriaNombre || product.subcategoria || "", 120),
-    serie: compactTextForCache(product.serie || product.serieNombre || "", 140),
-    serieNombre: compactTextForCache(product.serieNombre || product.serie || "", 140),
-    evento: compactTextForCache(product.evento || product.eventoNombre || "", 140),
-    eventoNombre: compactTextForCache(product.eventoNombre || product.evento || "", 140),
-    origen: compactTextForCache(product.origen || product.origenNombre || "", 120),
-    origenNombre: compactTextForCache(product.origenNombre || product.origen || product.pais || "", 120),
-    pais: compactTextForCache(product.pais || product.origenNombre || "", 120),
-    tipo: compactTextForCache(product.tipo || product.tipoProducto || "Producto", 140),
-    tipoProducto: compactTextForCache(product.tipoProducto || product.tipo || "Producto", 140),
-    tiposProducto: Array.isArray(product.tiposProducto)
-      ? product.tiposProducto.map((item) => compactTextForCache(item, 80)).slice(0, 8)
-      : [],
-    personaje: compactTextForCache(product.personaje || product.personajeNombre || "", 140),
-    personajeNombre: compactTextForCache(product.personajeNombre || product.personaje || "", 140),
-    personajesNombre: Array.isArray(product.personajesNombre)
-      ? product.personajesNombre.map((item) => compactTextForCache(item, 90)).slice(0, 10)
-      : [],
-    varianteTipo: normalizeVariantMode(product.varianteTipo || product.tipoVariante),
-    variantes: compactVariantsForCache(product.variantes || product.variants || []),
-    stock: Number(product.stock || 0),
-    tiempoEstimado: compactTextForCache(product.tiempoEstimado || "", 120),
-    estado: product.estado || "Activo",
-    disponibilidad: product.disponibilidad || "stock",
-    adulto: Boolean(product.adulto),
-    esNuevo: Boolean(product.esNuevo),
-    esDestacado: Boolean(product.esDestacado),
-    activo: product.activo !== false,
-    imagen: isCacheableImageSource(mainImage) ? mainImage : images[0] || "",
-    imagenes: images
-  };
-}
-
-function compactBasicItemForCache(item = {}, imageFields = ["imagen", "cover", "portada"]) {
-  const imageSources = [];
-
-  imageFields.forEach((field) => {
-    const source = getImageSource(item?.[field]);
-    if (isCacheableImageSource(source)) imageSources.push(source);
-  });
-
-  if (Array.isArray(item?.imagenes)) {
-    imageSources.push(...compactImagesForCache(item.imagenes));
-  }
-
-  const image = imageSources.find(Boolean) || "";
-
-  return {
-    id: item.id || item._id || "",
-    _id: item._id || item.id || "",
-    nombre: compactTextForCache(item.nombre || item.titulo || item.name || "", 140),
-    titulo: compactTextForCache(item.titulo || item.nombre || item.name || "", 140),
-    slug: compactTextForCache(item.slug || "", 140),
-    descripcion: compactTextForCache(item.descripcion || item.description || "", 220),
-    imagen: image,
-    imagenes: image ? [image] : [],
-    pais: compactTextForCache(item.pais || item.origenNombre || item.code || "", 80),
-    origenNombre: compactTextForCache(item.origenNombre || item.pais || "", 80),
-    categoriaNombre: compactTextForCache(item.categoriaNombre || item.categoria || "", 100),
-    tipo: compactTextForCache(item.tipo || item.tipoProducto || "", 100),
-    estado: item.estado || "Activo",
-    activo: item.activo !== false
-  };
-}
-
-function compactAdminDataForCache(data = defaultAdminData) {
-  return {
-    ...defaultAdminData,
-    products: (data.products || []).map(compactProductForCache).slice(0, 300),
-    events: (data.events || []).map((item) => compactBasicItemForCache(item, ["imagen", "cover", "poster"])).slice(0, 100),
-    series: (data.series || []).map((item) => compactBasicItemForCache(item, ["imagen", "portada", "cover"])).slice(0, 200),
-    characters: (data.characters || []).map((item) => compactBasicItemForCache(item, ["imagen", "avatar", "cover"])).slice(0, 250),
-    categories: (data.categories || []).map((item) => compactBasicItemForCache(item, ["imagen", "cover"])).slice(0, 120),
-    creators: (data.creators || []).map((item) => compactBasicItemForCache(item, ["imagen", "avatar"])).slice(0, 120),
-    origins: (data.origins || []).map((item) => compactBasicItemForCache(item, ["imagen", "bandera", "flag"])).slice(0, 80),
-    users: []
-  };
-}
-
-function readCachedCatalogData() {
-  if (typeof window === "undefined") {
-    return {
-      data: defaultAdminData,
-      hasCache: false,
-      cachedAt: null
-    };
-  }
-
-  try {
-    const rawValue = window.localStorage.getItem(CATALOG_CACHE_KEY);
-
-    if (!rawValue) {
-      return {
-        data: defaultAdminData,
-        hasCache: false,
-        cachedAt: null
-      };
-    }
-
-    const parsedValue = JSON.parse(rawValue);
-    const cachedAt = Number(parsedValue.cachedAt || 0);
-    const isFreshEnough =
-      cachedAt > 0 && Date.now() - cachedAt <= CACHE_MAX_AGE_MS;
-
-    if (
-      parsedValue.version !== CACHE_VERSION ||
-      !parsedValue.data ||
-      !isFreshEnough
-    ) {
-      return {
-        data: defaultAdminData,
-        hasCache: false,
-        cachedAt: null
-      };
-    }
-
-    const cachedData = {
-      ...defaultAdminData,
-      ...parsedValue.data
-    };
-
-    return {
-      data: cachedData,
-      hasCache: hasMeaningfulData(cachedData),
-      cachedAt
-    };
-  } catch {
-    return {
-      data: defaultAdminData,
-      hasCache: false,
-      cachedAt: null
-    };
-  }
-}
-
-function writeCachedCatalogData(data = defaultAdminData) {
-  if (typeof window === "undefined" || !hasMeaningfulData(data)) {
-    return {
-      ok: false,
-      cachedAt: null,
-      reason: "empty"
-    };
-  }
-
-  try {
-    const payload = {
-      version: CACHE_VERSION,
-      cachedAt: Date.now(),
-      data: compactAdminDataForCache(data)
-    };
-
-    const serialized = JSON.stringify(payload);
-
-    if (serialized.length > CACHE_MAX_BYTES) {
-      window.localStorage.removeItem(CATALOG_CACHE_KEY);
-      return {
-        ok: false,
-        cachedAt: null,
-        reason: "too_large"
-      };
-    }
-
-    window.localStorage.setItem(CATALOG_CACHE_KEY, serialized);
-
-    return {
-      ok: true,
-      cachedAt: payload.cachedAt,
-      reason: "saved"
-    };
-  } catch (error) {
-    try {
-      window.localStorage.removeItem(CATALOG_CACHE_KEY);
-    } catch {
-      // No es crítico: la tienda puede seguir funcionando sin caché local.
-    }
-
-    return {
-      ok: false,
-      cachedAt: null,
-      reason: error?.name || "storage_error"
-    };
-  }
-}
 
 function createSlug(text = "") {
   return text
@@ -355,12 +86,6 @@ function normalizeText(text = "") {
 
 function isMongoObjectId(value) {
   return typeof value === "string" && /^[0-9a-fA-F]{24}$/.test(value);
-}
-
-function isReadableLabel(value = "") {
-  const cleanValue = value.toString().trim();
-
-  return Boolean(cleanValue) && !isMongoObjectId(cleanValue);
 }
 
 function getId(item) {
@@ -580,12 +305,11 @@ function normalizeCharacterFromApi(character = {}) {
   };
 }
 
-
 function createVariantCode(text = "", index = 0) {
   const slug = text
     .toString()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .toLowerCase()
     .trim()
     .replace(/[^a-z0-9]+/g, "-")
@@ -606,6 +330,16 @@ function normalizeVariantMode(value = "sin_variantes") {
   }
 
   return "sin_variantes";
+}
+
+function getSafeImagenIndex(value, fallbackIndex = 0) {
+  const numberValue = Number(value);
+
+  if (!Number.isFinite(numberValue) || numberValue < 0) {
+    return Math.max(0, Number(fallbackIndex || 0));
+  }
+
+  return Math.floor(numberValue);
 }
 
 function normalizeProductVariants(value = [], basePrice = 0, mode = "sin_variantes") {
@@ -634,15 +368,10 @@ function normalizeProductVariants(value = [], basePrice = 0, mode = "sin_variant
           ? Number(variant?.precio ?? variant?.price ?? variant?.precioReferencial ?? 0)
           : Number(basePrice || 0);
 
-      const rawImagenIndex =
-        variant?.imagenIndex ??
-        variant?.imageIndex ??
-        variant?.selectedImageIndex ??
-        index;
-
-      const imagenIndex = Number.isFinite(Number(rawImagenIndex))
-        ? Math.max(0, Math.floor(Number(rawImagenIndex)))
-        : index;
+      const imagenIndex = getSafeImagenIndex(
+        variant?.imagenIndex ?? variant?.imageIndex ?? variant?.selectedImageIndex,
+        index
+      );
 
       return {
         codigo,
@@ -653,18 +382,6 @@ function normalizeProductVariants(value = [], basePrice = 0, mode = "sin_variant
         activa: variant?.activa !== undefined ? Boolean(variant.activa) : true,
         orden: Number(variant?.orden ?? index)
       };
-      return variants
-        .map((variant, index) => ({
-          codigo: compactTextForCache(variant?.codigo || variant?.code || `opcion-${index + 1}`, 60),
-          nombre: compactTextForCache(variant?.nombre || variant?.name || `Opción ${index + 1}`, 90),
-          precio: Number(variant?.precio ?? variant?.price ?? 0),
-          stock: Number(variant?.stock || 0),
-          imagenIndex: Number.isFinite(Number(variant?.imagenIndex))
-            ? Math.max(0, Math.floor(Number(variant.imagenIndex)))
-            : index,
-          activa: variant?.activa !== false,
-          orden: Number(variant?.orden ?? index)
-        }))
     })
     .filter(Boolean)
     .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
@@ -692,16 +409,6 @@ function normalizeProductFromApi(product = {}) {
     typeof product.categoria === "string"
       ? product.categoria
       : getId(product.categoria);
-
-  const subcategoriaNombre = getRelatedName(
-    product.subcategoria,
-    product.subcategoriaNombre || product.subcategory || ""
-  );
-
-  const subcategoriaId =
-    typeof product.subcategoria === "string"
-      ? product.subcategoria
-      : getId(product.subcategoria);
 
   const origenNombre = getRelatedName(
     product.origen,
@@ -745,10 +452,6 @@ function normalizeProductFromApi(product = {}) {
     categoria: categoriaNombre,
     categoriaId,
     categoriaNombre,
-
-    subcategoria: subcategoriaNombre,
-    subcategoriaId,
-    subcategoriaNombre,
 
     origen: origenNombre,
     origenNombre,
@@ -806,9 +509,9 @@ function normalizeSeriesFromApi(serie = {}) {
     getRelatedName(
       serie.categoriaPrincipal,
       serie.categoriaPrincipalNombre ||
-      serie.categoriaNombre ||
-      serie.categoria ||
-      "Series"
+        serie.categoriaNombre ||
+        serie.categoria ||
+        "Series"
     ) || "Series";
 
   const origenNombre =
@@ -875,15 +578,15 @@ function normalizeEventFromApi(event = {}) {
     ...normalizeArrayText(event.serieNombre),
     ...normalizeArrayText(event.series),
     ...normalizeArrayText(event.serie)
-  ]).filter(isReadableLabel);
+  ]);
 
   const seriesIds = Array.isArray(event.series)
     ? event.series
-      .map((serie) => {
-        if (typeof serie === "string") return serie;
-        return getId(serie);
-      })
-      .filter(isMongoObjectId)
+        .map((serie) => {
+          if (typeof serie === "string") return serie;
+          return getId(serie);
+        })
+        .filter(isMongoObjectId)
     : [];
 
   const legacySerieId =
@@ -963,8 +666,8 @@ function buildCategoryPayloadForApi(payload = {}) {
       payload.activa !== undefined
         ? Boolean(payload.activa)
         : payload.activo !== undefined
-          ? Boolean(payload.activo)
-          : true
+        ? Boolean(payload.activo)
+        : true
   };
 }
 
@@ -1003,7 +706,6 @@ function buildCharacterPayloadForApi(payload = {}) {
 
 function buildProductPayloadForApi(payload = {}, options = {}) {
   const categoryValue = payload.categoria || payload.categoriaId || "";
-  const subcategoryValue = payload.subcategoria || payload.subcategoriaId || "";
   const serieValue = payload.serie || payload.serieId || "";
   const eventValue = payload.evento || payload.eventoId || "";
   const originValue = payload.origen || payload.origenId || "";
@@ -1030,12 +732,6 @@ function buildProductPayloadForApi(payload = {}, options = {}) {
     categoria: isMongoObjectId(categoryValue) ? categoryValue : "",
     categoriaId: isMongoObjectId(categoryValue) ? categoryValue : "",
     categoriaNombre: payload.categoriaNombre || getRelatedName(categoryValue),
-
-    subcategoria: isMongoObjectId(subcategoryValue) ? subcategoryValue : "",
-    subcategoriaId: isMongoObjectId(subcategoryValue) ? subcategoryValue : "",
-    subcategoriaNombre:
-      payload.subcategoriaNombre ||
-      (isMongoObjectId(subcategoryValue) ? "" : getRelatedName(subcategoryValue)),
 
     serie: isMongoObjectId(serieValue) ? serieValue : "",
     serieId: isMongoObjectId(serieValue) ? serieValue : "",
@@ -1156,15 +852,15 @@ function buildSeriesPayloadForApi(payload = {}, options = {}) {
       payload.activa !== undefined
         ? Boolean(payload.activa)
         : payload.activo !== undefined
-          ? Boolean(payload.activo)
-          : true,
+        ? Boolean(payload.activo)
+        : true,
 
     activo:
       payload.activo !== undefined
         ? Boolean(payload.activo)
         : payload.activa !== undefined
-          ? Boolean(payload.activa)
-          : true,
+        ? Boolean(payload.activa)
+        : true,
 
     orden:
       payload.orden !== undefined && payload.orden !== ""
@@ -1194,7 +890,7 @@ function buildEventPayloadForApi(payload = {}, options = {}) {
     ...normalizeArrayText(payload.seriesNombre),
     ...normalizeArrayText(payload.serieNombre),
     ...normalizeArrayText(payload.serie)
-  ]).filter(isReadableLabel);
+  ]);
 
   const categoryValue = payload.categoria || payload.categoriaNombre || "";
   const originValue = payload.origen || payload.origenNombre || payload.pais || "";
@@ -1260,17 +956,8 @@ function replaceItemById(collection = [], item) {
 }
 
 export function AdminDataProvider({ children }) {
-  const cachedCatalogData = useMemo(() => readCachedCatalogData(), []);
-  const [adminData, setAdminData] = useState(cachedCatalogData.data);
+  const [adminData, setAdminData] = useState(defaultAdminData);
   const [storageError, setStorageError] = useState("");
-  const [hasCachedCatalog, setHasCachedCatalog] = useState(cachedCatalogData.hasCache);
-  const [catalogCacheTimestamp, setCatalogCacheTimestamp] = useState(
-    cachedCatalogData.cachedAt
-  );
-  const [initialDataLoaded, setInitialDataLoaded] = useState(
-    cachedCatalogData.hasCache
-  );
-  const [refreshingAdminData, setRefreshingAdminData] = useState(false);
 
   const [productLoadError, setProductLoadError] = useState("");
   const [seriesLoadError, setSeriesLoadError] = useState("");
@@ -1327,9 +1014,7 @@ export function AdminDataProvider({ children }) {
 
     try {
       const data = await apiGetSeries();
-      const list = pickList(data, ["series", "items"])
-        .map(normalizeSeriesFromApi)
-        .filter((serie) => isReadableLabel(serie.nombre));
+      const list = pickList(data, ["series", "items"]).map(normalizeSeriesFromApi);
 
       updateCollection("series", list);
 
@@ -1456,22 +1141,15 @@ export function AdminDataProvider({ children }) {
   };
 
   const refreshAdminData = async () => {
-    setRefreshingAdminData(true);
-
-    try {
-      await Promise.all([
-        refreshProducts(),
-        refreshSeries(),
-        refreshEvents(),
-        refreshCharacters(),
-        refreshCategories(),
-        refreshCreators(),
-        refreshOrigins()
-      ]);
-    } finally {
-      setInitialDataLoaded(true);
-      setRefreshingAdminData(false);
-    }
+    await Promise.all([
+      refreshProducts(),
+      refreshSeries(),
+      refreshEvents(),
+      refreshCharacters(),
+      refreshCategories(),
+      refreshCreators(),
+      refreshOrigins()
+    ]);
   };
 
   useEffect(() => {
@@ -1479,31 +1157,16 @@ export function AdminDataProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
-    LEGACY_STORAGE_KEYS.forEach((key) => {
-      try {
-        window.localStorage.removeItem(key);
-      } catch {
-        // No es crítico. El navegador puede bloquear limpieza, pero la tienda sigue funcionando.
-      }
-    });
-
-    setStorageError("");
-  }, []);
-
-  useEffect(() => {
-    if (!hasMeaningfulData(adminData)) return;
-
-    const result = writeCachedCatalogData(adminData);
-
-    if (result.ok) {
-      setHasCachedCatalog(true);
-      setCatalogCacheTimestamp(result.cachedAt);
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+      setStorageError("");
+    } catch (error) {
+      console.error("No se pudo limpiar el almacenamiento local antiguo.", error);
+      setStorageError(
+        "No se pudo limpiar el almacenamiento local antiguo. Si el aviso continúa, limpia el almacenamiento del sitio desde el navegador."
+      );
     }
-
-    setStorageError("");
-  }, [adminData]);
+  }, []);
 
   const createProduct = async (payload) => {
     const apiPayload = buildProductPayloadForApi(payload, {
@@ -2063,17 +1726,6 @@ export function AdminDataProvider({ children }) {
       loadingCreators,
       loadingOrigins,
 
-      hasCachedCatalog,
-      catalogCacheTimestamp,
-      initialDataLoaded,
-      refreshingAdminData,
-      loadingPublicCatalog:
-        !initialDataLoaded ||
-        loadingProducts ||
-        loadingSeries ||
-        loadingEvents ||
-        refreshingAdminData,
-
       products: adminData.products,
       events: adminData.events,
       series: adminData.series,
@@ -2149,10 +1801,6 @@ export function AdminDataProvider({ children }) {
       loadingCreators,
       loadingOrigins,
 
-      hasCachedCatalog,
-      catalogCacheTimestamp,
-      initialDataLoaded,
-      refreshingAdminData,
       adminData
     ]
   );
