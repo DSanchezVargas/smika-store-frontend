@@ -27,9 +27,12 @@ function getProductImage(product) {
 
   if (firstImage) {
     return (
-      firstImage.finalPreview ||
+      firstImage.secure_url ||
       firstImage.url ||
       firstImage.preview ||
+      firstImage.src ||
+      firstImage.imagen ||
+      firstImage.finalPreview ||
       product.image ||
       product.imagen ||
       ""
@@ -71,6 +74,9 @@ function getProductVariants(product) {
       nombre: variant.nombre || variant.name || `Opción ${index + 1}`,
       precio: Number(variant.precio ?? product?.precioReferencial ?? product?.precio ?? product?.price ?? 0),
       stock: Number(variant.stock || 0),
+      imagenIndex: Number.isFinite(Number(variant.imagenIndex))
+        ? Math.max(0, Math.floor(Number(variant.imagenIndex)))
+        : 0,
       activa: variant.activa !== false,
       orden: Number(variant.orden ?? index)
     }))
