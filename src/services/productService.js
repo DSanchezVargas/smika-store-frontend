@@ -71,10 +71,15 @@ async function parseResponse(response) {
   return data;
 }
 
-function buildHeaders({ withAuth = false } = {}) {
+function buildHeaders({ withAuth = false, noCache = false } = {}) {
   const headers = {
     "Content-Type": "application/json"
   };
+
+  if (noCache) {
+    headers["Cache-Control"] = "no-cache";
+    headers.Pragma = "no-cache";
+  }
 
   if (withAuth) {
     const token = getStoredToken();
@@ -88,16 +93,28 @@ function buildHeaders({ withAuth = false } = {}) {
 }
 
 export async function getProducts(params = {}) {
-  const query = new URLSearchParams(params).toString();
-  const url = query ? `${API_URL}/products?${query}` : `${API_URL}/products`;
+  const query = new URLSearchParams({
+    ...params,
+    _t: Date.now().toString()
+  }).toString();
 
-  const response = await fetch(url);
+  const url = `${API_URL}/products?${query}`;
+
+  const response = await fetch(url, {
+    method: "GET",
+    cache: "no-store",
+    headers: buildHeaders({ noCache: true })
+  });
 
   return parseResponse(response);
 }
 
 export async function getProductByIdOrSlug(idOrSlug) {
-  const response = await fetch(`${API_URL}/products/${idOrSlug}`);
+  const response = await fetch(`${API_URL}/products/${idOrSlug}?_t=${Date.now()}`, {
+    method: "GET",
+    cache: "no-store",
+    headers: buildHeaders({ noCache: true })
+  });
 
   return parseResponse(response);
 }
@@ -105,8 +122,10 @@ export async function getProductByIdOrSlug(idOrSlug) {
 export async function createProduct(payload) {
   const response = await fetch(`${API_URL}/products`, {
     method: "POST",
+    cache: "no-store",
     headers: buildHeaders({
-      withAuth: true
+      withAuth: true,
+      noCache: true
     }),
     body: JSON.stringify(payload)
   });
@@ -117,8 +136,10 @@ export async function createProduct(payload) {
 export async function updateProduct(productId, payload) {
   const response = await fetch(`${API_URL}/products/${productId}`, {
     method: "PUT",
+    cache: "no-store",
     headers: buildHeaders({
-      withAuth: true
+      withAuth: true,
+      noCache: true
     }),
     body: JSON.stringify(payload)
   });
@@ -129,8 +150,10 @@ export async function updateProduct(productId, payload) {
 export async function deleteProduct(productId) {
   const response = await fetch(`${API_URL}/products/${productId}`, {
     method: "DELETE",
+    cache: "no-store",
     headers: buildHeaders({
-      withAuth: true
+      withAuth: true,
+      noCache: true
     })
   });
 
