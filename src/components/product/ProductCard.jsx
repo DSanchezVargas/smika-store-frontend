@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { Heart, Loader2, ShoppingBag } from "lucide-react";
 
@@ -20,26 +20,51 @@ function getProductId(product) {
   return product?._id || product?.mongoId || product?.productId || product?.id || "";
 }
 
-function getProductImage(product) {
-  const firstImage = product?.imagenes?.[0];
+function getImageSource(image) {
+  if (!image) return "";
 
-  if (typeof firstImage === "string") return firstImage;
+  if (typeof image === "string") return image;
 
-  if (firstImage) {
-    return (
-      firstImage.url ||
-      firstImage.secure_url ||
-      firstImage.preview ||
-      firstImage.src ||
-      firstImage.imagen ||
-      firstImage.finalPreview ||
-      product.image ||
-      product.imagen ||
-      ""
-    );
+  return (
+    image.url ||
+    image.secure_url ||
+    image.src ||
+    image.preview ||
+    image.imagen ||
+    image.finalPreview ||
+    ""
+  );
+}
+
+function getProductImages(product) {
+  const images = Array.isArray(product?.imagenes) ? product.imagenes : [];
+  const normalizedImages = images.map(getImageSource).filter(Boolean);
+  const fallbackImage = getImageSource(product?.image || product?.imagen || product?.cover);
+
+  const finalImages = [...normalizedImages];
+
+  if (fallbackImage && !finalImages.includes(fallbackImage)) {
+    finalImages.push(fallbackImage);
   }
 
-  return product.image || product.imagen || "";
+  return finalImages;
+}
+
+function getSafeVariantImageIndex(variant, imagesLength = 0) {
+  if (!variant || imagesLength <= 0) return 0;
+
+  const rawImageIndex =
+    variant.imagenIndex ??
+    variant.imageIndex ??
+    variant.selectedImageIndex ??
+    0;
+
+  const imageIndex = Number(rawImageIndex);
+
+  if (!Number.isFinite(imageIndex) || imageIndex < 0) return 0;
+  if (imageIndex >= imagesLength) return 0;
+
+  return Math.floor(imageIndex);
 }
 
 function getProductName(product) {
@@ -49,7 +74,6 @@ function getProductName(product) {
 function getProductPrice(product) {
   return Number(product?.precioReferencial || product?.precio || product?.price || 0);
 }
-
 
 function createVariantCode(text = "", index = 0) {
   const slug = text
@@ -72,8 +96,17 @@ function getProductVariants(product) {
     .map((variant, index) => ({
       codigo: variant.codigo || createVariantCode(variant.nombre, index),
       nombre: variant.nombre || variant.name || `Opción ${index + 1}`,
-      precio: Number(variant.precio ?? product?.precioReferencial ?? product?.precio ?? product?.price ?? 0),
+      precio: Number(
+        variant.precio ??
+          product?.precioReferencial ??
+          product?.precio ??
+          product?.price ??
+          0
+      ),
       stock: Number(variant.stock || 0),
+      imagenIndex: Number.isFinite(Number(variant.imagenIndex))
+        ? Math.max(0, Math.floor(Number(variant.imagenIndex)))
+        : index,
       activa: variant.activa !== false,
       orden: Number(variant.orden ?? index)
     }))
@@ -168,14 +201,20 @@ function ProductCard({ product }) {
 
   const productId = getProductId(product);
   const productSlug = product?.slug || productId;
-  const productImage = getProductImage(product);
   const productName = getProductName(product);
-  const productVariants = getProductVariants(product);
+  const productVariants = useMemo(() => getProductVariants(product), [product]);
   const hasVariants = productVariants.length > 0;
   const selectedVariant =
     productVariants.find((variant) => variant.codigo === selectedVariantCode) ||
     productVariants[0] ||
     null;
+  const galleryImages = useMemo(() => getProductImages(product), [product]);
+  const selectedVariantImageIndex = getSafeVariantImageIndex(
+    selectedVariant,
+    galleryImages.length
+  );
+  const productImage =
+    galleryImages[selectedVariantImageIndex] || galleryImages[0] || "";
   const productPrice = getVariantPrice(product, selectedVariant);
   const productCategory = getProductCategory(product);
   const productSeries = getProductSeries(product);
@@ -229,6 +268,7 @@ function ProductCard({ product }) {
   useEffect(() => {
     refreshFavoriteState({ silent: true });
   }, [isAuthenticated, productId, productSlug]);
+
   useEffect(() => {
     if (productVariants.length === 0) {
       setSelectedVariantCode("");
@@ -240,7 +280,6 @@ function ProductCard({ product }) {
       return exists ? currentCode : productVariants[0].codigo;
     });
   }, [productId, productVariants.map((variant) => variant.codigo).join("|")]);
-
 
   useEffect(() => {
     const handlePreferencesUpdated = (event) => {
@@ -334,8 +373,13 @@ function ProductCard({ product }) {
         <div className="aspect-square w-full overflow-hidden bg-white">
           {productImage ? (
             <img
+              key={`${selectedVariant?.codigo || "producto"}-${productImage}`}
               src={productImage}
-              alt={productName}
+              alt={
+                selectedVariant
+                  ? `${productName} - ${selectedVariant.nombre}`
+                  : productName
+              }
               className="h-full w-full object-contain p-3"
               loading="lazy"
               draggable="false"
