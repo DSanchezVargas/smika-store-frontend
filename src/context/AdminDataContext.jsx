@@ -218,7 +218,7 @@ function compactAdminDataForCache(data = defaultAdminData) {
   return {
     ...defaultAdminData,
     products: (data.products || []).map(compactProductForCache).slice(0, 300),
-    events: (data.events || []).map((item) => compactBasicItemForCache(item, ["imagen", "cover", "poster"])) .slice(0, 100),
+    events: (data.events || []).map((item) => compactBasicItemForCache(item, ["imagen", "cover", "poster"])).slice(0, 100),
     series: (data.series || []).map((item) => compactBasicItemForCache(item, ["imagen", "portada", "cover"])).slice(0, 200),
     characters: (data.characters || []).map((item) => compactBasicItemForCache(item, ["imagen", "avatar", "cover"])).slice(0, 250),
     categories: (data.categories || []).map((item) => compactBasicItemForCache(item, ["imagen", "cover"])).slice(0, 120),
@@ -634,14 +634,37 @@ function normalizeProductVariants(value = [], basePrice = 0, mode = "sin_variant
           ? Number(variant?.precio ?? variant?.price ?? variant?.precioReferencial ?? 0)
           : Number(basePrice || 0);
 
+      const rawImagenIndex =
+        variant?.imagenIndex ??
+        variant?.imageIndex ??
+        variant?.selectedImageIndex ??
+        index;
+
+      const imagenIndex = Number.isFinite(Number(rawImagenIndex))
+        ? Math.max(0, Math.floor(Number(rawImagenIndex)))
+        : index;
+
       return {
         codigo,
         nombre,
         precio: priceValue,
         stock: Number(variant?.stock || 0),
+        imagenIndex,
         activa: variant?.activa !== undefined ? Boolean(variant.activa) : true,
         orden: Number(variant?.orden ?? index)
       };
+      return variants
+        .map((variant, index) => ({
+          codigo: compactTextForCache(variant?.codigo || variant?.code || `opcion-${index + 1}`, 60),
+          nombre: compactTextForCache(variant?.nombre || variant?.name || `Opción ${index + 1}`, 90),
+          precio: Number(variant?.precio ?? variant?.price ?? 0),
+          stock: Number(variant?.stock || 0),
+          imagenIndex: Number.isFinite(Number(variant?.imagenIndex))
+            ? Math.max(0, Math.floor(Number(variant.imagenIndex)))
+            : index,
+          activa: variant?.activa !== false,
+          orden: Number(variant?.orden ?? index)
+        }))
     })
     .filter(Boolean)
     .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
@@ -783,9 +806,9 @@ function normalizeSeriesFromApi(serie = {}) {
     getRelatedName(
       serie.categoriaPrincipal,
       serie.categoriaPrincipalNombre ||
-        serie.categoriaNombre ||
-        serie.categoria ||
-        "Series"
+      serie.categoriaNombre ||
+      serie.categoria ||
+      "Series"
     ) || "Series";
 
   const origenNombre =
@@ -856,11 +879,11 @@ function normalizeEventFromApi(event = {}) {
 
   const seriesIds = Array.isArray(event.series)
     ? event.series
-        .map((serie) => {
-          if (typeof serie === "string") return serie;
-          return getId(serie);
-        })
-        .filter(isMongoObjectId)
+      .map((serie) => {
+        if (typeof serie === "string") return serie;
+        return getId(serie);
+      })
+      .filter(isMongoObjectId)
     : [];
 
   const legacySerieId =
@@ -940,8 +963,8 @@ function buildCategoryPayloadForApi(payload = {}) {
       payload.activa !== undefined
         ? Boolean(payload.activa)
         : payload.activo !== undefined
-        ? Boolean(payload.activo)
-        : true
+          ? Boolean(payload.activo)
+          : true
   };
 }
 
@@ -1133,15 +1156,15 @@ function buildSeriesPayloadForApi(payload = {}, options = {}) {
       payload.activa !== undefined
         ? Boolean(payload.activa)
         : payload.activo !== undefined
-        ? Boolean(payload.activo)
-        : true,
+          ? Boolean(payload.activo)
+          : true,
 
     activo:
       payload.activo !== undefined
         ? Boolean(payload.activo)
         : payload.activa !== undefined
-        ? Boolean(payload.activa)
-        : true,
+          ? Boolean(payload.activa)
+          : true,
 
     orden:
       payload.orden !== undefined && payload.orden !== ""
