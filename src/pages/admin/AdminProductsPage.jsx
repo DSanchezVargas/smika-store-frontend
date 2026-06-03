@@ -205,12 +205,18 @@ function createVariantCode(text = "", index = 0) {
   return slug || `opcion-${index + 1}`;
 }
 
+function createVariantUiId(index = 0) {
+  return `variant-${Date.now()}-${index}-${Math.random().toString(16).slice(2)}`;
+}
+
 function createEmptyVariant(index = 0) {
   return {
+    uiId: createVariantUiId(index),
     codigo: `opcion-${index + 1}`,
     nombre: "",
     precio: "",
     stock: "",
+    imagenIndex: index,
     activa: true,
     orden: index
   };
@@ -243,6 +249,7 @@ function normalizeVariantsFromProduct(product) {
       if (!nombre) return null;
 
       return {
+        uiId: variant.uiId || createVariantUiId(index),
         codigo: variant.codigo || variant.code || createVariantCode(nombre, index),
         nombre,
         precio:
@@ -250,6 +257,9 @@ function normalizeVariantsFromProduct(product) {
             ? Number(variant.precio ?? variant.price ?? 0)
             : basePrice,
         stock: variant.stock !== undefined ? Number(variant.stock || 0) : "",
+        imagenIndex: Number.isFinite(Number(variant.imagenIndex))
+          ? Math.max(0, Number(variant.imagenIndex))
+          : index,
         activa: variant.activa !== false,
         orden: Number(variant.orden ?? index)
       };
@@ -1137,7 +1147,13 @@ function AdminProductsPage() {
 
       nextVariants[index] = {
         ...currentVariant,
-        [field]: field === "activa" ? Boolean(value) : value,
+        uiId: currentVariant.uiId || createVariantUiId(index),
+        [field]:
+          field === "activa"
+            ? Boolean(value)
+            : field === "imagenIndex"
+              ? Number(value || 0)
+              : value,
         codigo:
           field === "nombre"
             ? createVariantCode(value, index)
@@ -1593,6 +1609,7 @@ function AdminProductsPage() {
                     ? Number(variant.precio || 0)
                     : Number(form.precio || 0),
                 stock: Number(variant.stock || 0),
+                imagenIndex: Number(variant.imagenIndex || 0),
                 activa: variant.activa !== false,
                 orden: index
               }))
@@ -2084,8 +2101,12 @@ function AdminProductsPage() {
                 <div className="grid gap-3">
                   {(form.variantes || []).map((variant, index) => (
                     <div
-                      key={`${variant.codigo || index}-${index}`}
-                      className="grid gap-3 rounded-3xl bg-[#F8F6F7] p-4 md:grid-cols-[1.2fr_0.8fr_0.8fr_auto] md:items-end"
+                      key={variant.uiId || `variant-${index}`}
+                      className={`grid gap-3 rounded-3xl bg-[#F8F6F7] p-4 md:items-end ${
+                        form.varianteTipo === "precio_diferente"
+                          ? "md:grid-cols-[1.1fr_0.65fr_0.65fr_0.95fr_auto]"
+                          : "md:grid-cols-[1.2fr_0.8fr_0.8fr_auto]"
+                      }`}
                     >
                       <label className="grid gap-2 text-xs font-black">
                         Nombre de opción
@@ -2132,6 +2153,27 @@ function AdminProductsPage() {
                           placeholder="Opcional"
                         />
                       </label>
+
+                      {form.varianteTipo === "precio_diferente" && (
+                        <label className="grid gap-2 text-xs font-black">
+                          Imagen opción
+                          <select
+                            value={Number(variant.imagenIndex ?? index)}
+                            onChange={(event) =>
+                              handleVariantChange(index, "imagenIndex", event.target.value)
+                            }
+                            className="w-full rounded-2xl border border-[#87CCC8]/30 px-4 py-3 outline-none"
+                          >
+                            {(images.length > 0 ? images : [null]).map((image, imageIndex) => (
+                              <option key={`variant-image-${imageIndex}`} value={imageIndex}>
+                                {image
+                                  ? `Imagen ${imageIndex + 1}${image.name ? ` · ${image.name}` : ""}`
+                                  : "Imagen principal"}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
 
                       <button
                         type="button"

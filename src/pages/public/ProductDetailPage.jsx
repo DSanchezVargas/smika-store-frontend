@@ -101,6 +101,9 @@ function getProductVariants(product) {
       nombre: variant.nombre || variant.name || `Opción ${index + 1}`,
       precio: Number(variant.precio ?? product?.precioReferencial ?? product?.precio ?? product?.price ?? 0),
       stock: Number(variant.stock || 0),
+      imagenIndex: Number.isFinite(Number(variant.imagenIndex))
+        ? Math.max(0, Number(variant.imagenIndex))
+        : 0,
       activa: variant.activa !== false,
       orden: Number(variant.orden ?? index)
     }))
@@ -114,6 +117,17 @@ function getVariantPrice(product, variant) {
   }
 
   return getProductPrice(product);
+}
+
+function getSafeVariantImageIndex(variant, imagesLength = 0) {
+  if (!variant || imagesLength <= 0) return 0;
+
+  const imageIndex = Number(variant.imagenIndex || 0);
+
+  if (!Number.isFinite(imageIndex) || imageIndex < 0) return 0;
+  if (imageIndex >= imagesLength) return 0;
+
+  return imageIndex;
 }
 
 function buildStoredProduct(product) {
@@ -240,6 +254,12 @@ function ProductDetailPage() {
   const activeImage = galleryImages[activeImageIndex] || galleryImages[0] || null;
   const hasImages = galleryImages.length > 0;
   const hasMultipleImages = galleryImages.length > 1;
+
+  useEffect(() => {
+    if (!selectedVariant || galleryImages.length === 0) return;
+
+    setActiveImageIndex(getSafeVariantImageIndex(selectedVariant, galleryImages.length));
+  }, [selectedVariant?.codigo, selectedVariant?.imagenIndex, galleryImages.length]);
 
   const goToLogin = () => {
     navigate(
@@ -658,25 +678,45 @@ function ProductDetailPage() {
                 {productVariants.map((variant) => {
                   const active = selectedVariant?.codigo === variant.codigo;
                   const variantPrice = getVariantPrice(product, variant);
+                  const variantImageIndex = getSafeVariantImageIndex(variant, galleryImages.length);
+                  const variantImage = galleryImages[variantImageIndex] || null;
 
                   return (
                     <button
                       key={variant.codigo}
                       type="button"
-                      onClick={() => setSelectedVariantCode(variant.codigo)}
+                      onClick={() => {
+                        setSelectedVariantCode(variant.codigo);
+                        setActiveImageIndex(variantImageIndex);
+                      }}
                       className={`rounded-3xl border px-4 py-4 text-left transition ${
                         active
                           ? "border-[#87CCC8] bg-white shadow-lg"
                           : "border-transparent bg-white/70 hover:border-[#87CCC8]/50"
                       }`}
                     >
-                      <span className="block text-sm font-black text-[#2F2F2F]">
-                        {variant.nombre}
-                      </span>
-                      <span className="mt-1 block text-xs font-bold text-gray-500">
-                        {product.varianteTipo === "precio_diferente"
-                          ? `S/ ${variantPrice}`
-                          : `Mismo precio: S/ ${variantPrice}`}
+                      <span className="flex items-center gap-3">
+                        {variantImage && (
+                          <span className="block h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-[#F8F6F7]">
+                            <CroppedImagePreview
+                              image={variantImage}
+                              alt={`${product.nombre} ${variant.nombre}`}
+                              className="h-full w-full"
+                              rounded="rounded-2xl"
+                            />
+                          </span>
+                        )}
+
+                        <span>
+                          <span className="block text-sm font-black text-[#2F2F2F]">
+                            {variant.nombre}
+                          </span>
+                          <span className="mt-1 block text-xs font-bold text-gray-500">
+                            {product.varianteTipo === "precio_diferente"
+                              ? `S/ ${variantPrice}`
+                              : `Mismo precio: S/ ${variantPrice}`}
+                          </span>
+                        </span>
                       </span>
                     </button>
                   );
