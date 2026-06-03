@@ -60,7 +60,14 @@ function getBestImageSource(image, ignoreFinalPreview = false) {
     return image.finalPreview;
   }
 
-  return image.url || image.preview || image.finalPreview || "";
+  return (
+    image.url ||
+    image.preview ||
+    image.finalPreview ||
+    image.src ||
+    image.imagen ||
+    ""
+  );
 }
 
 function CroppedImagePreview({
@@ -73,16 +80,27 @@ function CroppedImagePreview({
   const [croppedSrc, setCroppedSrc] = useState("");
 
   useEffect(() => {
+    let isActive = true;
+
     const sourceSrc = getBestImageSource(image, ignoreFinalPreview);
 
     if (!sourceSrc) {
       setCroppedSrc("");
-      return;
+      return () => {
+        isActive = false;
+      };
     }
+
+    // Cambio importante:
+    // Apenas cambia la imagen, mostramos la nueva fuente de inmediato.
+    // Así no se queda pegada la imagen anterior mientras se recalcula el recorte.
+    setCroppedSrc(sourceSrc);
 
     if (image?.finalPreview && !ignoreFinalPreview) {
       setCroppedSrc(image.finalPreview);
-      return;
+      return () => {
+        isActive = false;
+      };
     }
 
     const sourceImage = new window.Image();
@@ -92,6 +110,8 @@ function CroppedImagePreview({
     }
 
     sourceImage.onload = () => {
+      if (!isActive) return;
+
       const naturalWidth = sourceImage.naturalWidth;
       const naturalHeight = sourceImage.naturalHeight;
 
@@ -131,24 +151,34 @@ function CroppedImagePreview({
       );
 
       try {
-        setCroppedSrc(canvas.toDataURL("image/jpeg", 0.92));
+        if (isActive) {
+          setCroppedSrc(canvas.toDataURL("image/jpeg", 0.92));
+        }
       } catch {
-        // Algunas imágenes externas no permiten exportar canvas por CORS.
-        // En ese caso se muestra la imagen original para no romper el panel.
-        setCroppedSrc(sourceSrc);
+        if (isActive) {
+          setCroppedSrc(sourceSrc);
+        }
       }
     };
 
     sourceImage.onerror = () => {
-      setCroppedSrc(sourceSrc);
+      if (isActive) {
+        setCroppedSrc(sourceSrc);
+      }
     };
 
     sourceImage.src = sourceSrc;
+
+    return () => {
+      isActive = false;
+    };
   }, [
     image,
     image?.url,
     image?.preview,
     image?.finalPreview,
+    image?.src,
+    image?.imagen,
     image?.zoom,
     image?.pan?.x,
     image?.pan?.y,
@@ -176,6 +206,7 @@ function CroppedImagePreview({
       className={`relative overflow-hidden bg-white ${rounded} ${className}`}
     >
       <img
+        key={fallbackSrc}
         src={croppedSrc || fallbackSrc}
         alt={alt}
         className="h-full w-full object-contain p-3"
