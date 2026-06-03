@@ -54,12 +54,9 @@ function getImageSource(image) {
 
   if (typeof image === "string") return image;
 
-  // En la vista pública priorizamos la URL real guardada en Cloudinary.
-  // Algunas imágenes antiguas pueden conservar finalPreview recortado/base64 y eso puede
-  // hacer que dos opciones distintas parezcan mostrar la misma imagen.
   return (
-    image.secure_url ||
     image.url ||
+    image.secure_url ||
     image.preview ||
     image.src ||
     image.imagen ||
@@ -579,7 +576,6 @@ function ProductDetailPage() {
                 alt={product.nombre}
                 className="aspect-square w-full"
                 rounded="rounded-[28px]"
-                ignoreFinalPreview
               />
             ) : (
               <div className="aspect-square w-full bg-[#87CCC8] text-white flex flex-col items-center justify-center gap-3">
@@ -634,7 +630,6 @@ function ProductDetailPage() {
                     alt={`${product.nombre} ${index + 1}`}
                     className="h-full w-full"
                     rounded="rounded-xl"
-                    ignoreFinalPreview
                   />
                 </button>
               ))}
@@ -768,7 +763,6 @@ function ProductDetailPage() {
                               alt={`${product.nombre} ${variant.nombre}`}
                               className="h-full w-full"
                               rounded="rounded-2xl"
-                              ignoreFinalPreview
                             />
                           </span>
                         )}

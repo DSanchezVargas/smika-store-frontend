@@ -56,17 +56,13 @@ function getBestImageSource(image, ignoreFinalPreview = false) {
 
   if (typeof image === "string") return image;
 
-  if (!ignoreFinalPreview && image.finalPreview) {
-    return image.finalPreview;
-  }
-
   return (
-    image.secure_url ||
     image.url ||
+    image.secure_url ||
     image.preview ||
     image.src ||
     image.imagen ||
-    image.finalPreview ||
+    (!ignoreFinalPreview ? image.finalPreview : "") ||
     ""
   );
 }
@@ -96,13 +92,6 @@ function CroppedImagePreview({
     // Apenas cambia la imagen, mostramos la nueva fuente de inmediato.
     // Así no se queda pegada la imagen anterior mientras se recalcula el recorte.
     setCroppedSrc(sourceSrc);
-
-    if (image?.finalPreview && !ignoreFinalPreview) {
-      setCroppedSrc(image.finalPreview);
-      return () => {
-        isActive = false;
-      };
-    }
 
     const sourceImage = new window.Image();
 
@@ -175,7 +164,6 @@ function CroppedImagePreview({
     };
   }, [
     image,
-    image?.secure_url,
     image?.url,
     image?.preview,
     image?.finalPreview,

@@ -117,11 +117,12 @@ function getImageSource(image) {
 
   if (typeof image === "object") {
     return (
-      image.finalPreview ||
       image.url ||
+      image.secure_url ||
       image.preview ||
       image.src ||
       image.imagen ||
+      image.finalPreview ||
       ""
     );
   }
