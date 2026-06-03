@@ -19,6 +19,7 @@ import CreatableSelect from "../../components/admin/CreatableSelect";
 import MultiCreatableSelect from "../../components/admin/MultiCreatableSelect";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 import { useAdminData } from "../../context/AdminDataContext";
+import { getProductByIdOrSlug as apiGetProductByIdOrSlug } from "../../services/productService";
 import {
   createProductType as apiCreateProductType,
   getProductTypes as apiGetProductTypes
@@ -541,6 +542,10 @@ function pickAvailabilities(data) {
   return [];
 }
 
+function pickProductFromApiResponse(data = {}, fallbackProduct = {}) {
+  return data.product || data.producto || data.item || data.data || fallbackProduct || {};
+}
+
 function normalizeAvailabilityFromApi(availability = {}) {
   const nombre = availability.nombre || availability.name || availability.label || "";
   const value =
@@ -622,6 +627,7 @@ function AdminProductsPage() {
   const [editingProduct, setEditingProduct] = useState(null);
   const [message, setMessage] = useState("");
   const [saving, setSaving] = useState(false);
+  const [loadingEditingProduct, setLoadingEditingProduct] = useState(false);
 
   const [managedProductTypes, setManagedProductTypes] = useState([]);
   const [loadingProductTypes, setLoadingProductTypes] = useState(false);
@@ -988,8 +994,7 @@ function AdminProductsPage() {
     setView("form");
   };
 
-  const openEditForm = (product) => {
-    setMessage("");
+  const fillEditForm = (product) => {
     setEditingProduct(product);
 
     setForm({
@@ -1029,6 +1034,39 @@ function AdminProductsPage() {
 
     setImagesTouched(false);
     setView("form");
+  };
+
+  const openEditForm = async (product) => {
+    const productId = getProductId(product);
+
+    setMessage("");
+    setLoadingEditingProduct(true);
+
+    try {
+      if (!productId) {
+        fillEditForm(product);
+        return;
+      }
+
+      setMessage("Cargando imágenes completas del producto...");
+
+      const data = await apiGetProductByIdOrSlug(productId);
+      const fullProduct = pickProductFromApiResponse(data, product);
+
+      fillEditForm({
+        ...product,
+        ...fullProduct
+      });
+
+      setMessage("");
+    } catch (error) {
+      setMessage(
+        error.message ||
+          "No se pudo cargar el producto completo con sus imágenes. Intenta recargar."
+      );
+    } finally {
+      setLoadingEditingProduct(false);
+    }
   };
 
   const handleChange = (event) => {
@@ -2550,9 +2588,9 @@ function AdminProductsPage() {
 
                         <p>
                           <strong>Imágenes:</strong>{" "}
-                          {Array.isArray(product.imagenes)
+                          {Array.isArray(product.imagenes) && product.imagenes.length > 0
                             ? product.imagenes.length
-                            : 0}
+                            : "se cargan al editar"}
                         </p>
                       </div>
 
@@ -2560,10 +2598,15 @@ function AdminProductsPage() {
                         <button
                           type="button"
                           onClick={() => openEditForm(product)}
-                          className="smika-button-primary flex-1 flex items-center justify-center gap-2"
+                          disabled={saving || loadingEditingProduct}
+                          className="smika-button-primary flex-1 flex items-center justify-center gap-2 disabled:opacity-60"
                         >
-                          <Pencil size={16} />
-                          Editar
+                          {loadingEditingProduct ? (
+                            <Loader2 size={16} className="animate-spin" />
+                          ) : (
+                            <Pencil size={16} />
+                          )}
+                          {loadingEditingProduct ? "Cargando..." : "Editar"}
                         </button>
 
                         <button
