@@ -14,7 +14,6 @@ import {
 
 import { useAdminData } from "../../context/AdminDataContext";
 import { useAuth } from "../../context/AuthContext";
-import { addProductToCart } from "../../services/cartService";
 import { getPublicProducts } from "../../utils/publicProducts";
 import CroppedImagePreview from "../../components/admin/CroppedImagePreview";
 import {
@@ -77,7 +76,6 @@ function getProductPrice(product) {
   return Number(product?.precio || product?.price || product?.precioReferencial || 0);
 }
 
-
 function createVariantCode(text = "", index = 0) {
   const slug = text
     .toString()
@@ -96,17 +94,27 @@ function getProductVariants(product) {
   if (!Array.isArray(product.variantes)) return [];
 
   return product.variantes
-    .map((variant, index) => ({
-      codigo: variant.codigo || createVariantCode(variant.nombre, index),
-      nombre: variant.nombre || variant.name || `Opción ${index + 1}`,
-      precio: Number(variant.precio ?? product?.precioReferencial ?? product?.precio ?? product?.price ?? 0),
-      stock: Number(variant.stock || 0),
-      imagenIndex: Number.isFinite(Number(variant.imagenIndex))
-        ? Math.max(0, Number(variant.imagenIndex))
-        : 0,
-      activa: variant.activa !== false,
-      orden: Number(variant.orden ?? index)
-    }))
+    .map((variant, index) => {
+      const imagenIndex = Number.isFinite(Number(variant.imagenIndex))
+        ? Math.max(0, Math.floor(Number(variant.imagenIndex)))
+        : 0;
+
+      return {
+        codigo: variant.codigo || createVariantCode(variant.nombre, index),
+        nombre: variant.nombre || variant.name || `Opción ${index + 1}`,
+        precio: Number(
+          variant.precio ??
+            product?.precioReferencial ??
+            product?.precio ??
+            product?.price ??
+            0
+        ),
+        stock: Number(variant.stock || 0),
+        imagenIndex,
+        activa: variant.activa !== false,
+        orden: Number(variant.orden ?? index)
+      };
+    })
     .filter((variant) => variant.activa && variant.nombre)
     .sort((a, b) => Number(a.orden || 0) - Number(b.orden || 0));
 }
@@ -122,7 +130,7 @@ function getVariantPrice(product, variant) {
 function getSafeVariantImageIndex(variant, imagesLength = 0) {
   if (!variant || imagesLength <= 0) return 0;
 
-  const imageIndex = Number(variant.imagenIndex || 0);
+  const imageIndex = Math.floor(Number(variant.imagenIndex ?? 0));
 
   if (!Number.isFinite(imageIndex) || imageIndex < 0) return 0;
   if (imageIndex >= imagesLength) return 0;
@@ -130,20 +138,32 @@ function getSafeVariantImageIndex(variant, imagesLength = 0) {
   return imageIndex;
 }
 
-function buildStoredProduct(product) {
+function buildStoredProduct(product, variant = null) {
   const productId = getStoredProductId(product);
+  const variantImageIndex = getSafeVariantImageIndex(
+    variant,
+    Array.isArray(product.imagenes) ? product.imagenes.length : 0
+  );
+  const variantImage = product.imagenes?.[variantImageIndex];
 
   return {
-    id: productId,
+    id: variant ? `${productId}-${variant.codigo}` : productId,
     productId,
     slug: product.slug || productId,
-    nombre: product.nombre,
-    precio: getProductPrice(product),
+    nombre: variant ? `${product.nombre} - ${variant.nombre}` : product.nombre,
+    varianteCodigo: variant?.codigo || "",
+    varianteNombre: variant?.nombre || "",
+    precio: getVariantPrice(product, variant),
     tipo: product.tipo || product.tipoProducto || "Producto",
     serie: product.serieNombre || product.serie || "",
     evento: product.eventoNombre || product.evento || "",
     cantidad: 1,
-    imagen: product.image || product.imagen || getImageSource(product.imagenes?.[0]) || "",
+    imagen:
+      getImageSource(variantImage) ||
+      product.image ||
+      product.imagen ||
+      getImageSource(product.imagenes?.[0]) ||
+      "",
     imagenes: product.imagenes || [],
     savedAt: new Date().toISOString()
   };
@@ -214,7 +234,6 @@ function ProductDetailPage() {
   const [isWishlist, setIsWishlist] = useState(false);
   const [favoriteLoading, setFavoriteLoading] = useState(false);
   const [wishlistLoading, setWishlistLoading] = useState(false);
-  const [orderLoading, setOrderLoading] = useState(false);
   const [selectedVariantCode, setSelectedVariantCode] = useState("");
 
   const user = auth?.user || auth?.currentUser || null;
@@ -251,15 +270,68 @@ function ProductDetailPage() {
     return fallbackImage ? [fallbackImage] : [];
   }, [product]);
 
-  const activeImage = galleryImages[activeImageIndex] || galleryImages[0] || null;
   const hasImages = galleryImages.length > 0;
   const hasMultipleImages = galleryImages.length > 1;
 
-  useEffect(() => {
-    if (!selectedVariant || galleryImages.length === 0) return;
+  const selectedVariantImageIndex =
+    hasVariants && selectedVariant
+      ? getSafeVariantImageIndex(selectedVariant, galleryImages.length)
+      : 0;
 
-    setActiveImageIndex(getSafeVariantImageIndex(selectedVariant, galleryImages.length));
-  }, [selectedVariant?.codigo, selectedVariant?.imagenIndex, galleryImages.length]);
+  const displayImageIndex =
+    hasVariants && selectedVariant ? selectedVariantImageIndex : activeImageIndex;
+
+  const activeImage = galleryImages[displayImageIndex] || galleryImages[0] || null;
+
+  useEffect(() => {
+    if (productVariants.length === 0) {
+      setSelectedVariantCode("");
+      return;
+    }
+
+    setSelectedVariantCode((currentCode) => {
+      const exists = productVariants.some((variant) => variant.codigo === currentCode);
+      return exists ? currentCode : productVariants[0].codigo;
+    });
+  }, [productId, productVariants.map((variant) => variant.codigo).join("|")]);
+
+  useEffect(() => {
+    if (!hasVariants || !selectedVariant || galleryImages.length === 0) return;
+
+    const nextImageIndex = getSafeVariantImageIndex(
+      selectedVariant,
+      galleryImages.length
+    );
+
+    setActiveImageIndex((currentIndex) =>
+      currentIndex === nextImageIndex ? currentIndex : nextImageIndex
+    );
+  }, [
+    hasVariants,
+    selectedVariant?.codigo,
+    selectedVariant?.imagenIndex,
+    galleryImages.length
+  ]);
+
+  const selectImageAndRelatedVariant = (imageIndex) => {
+    const safeImageIndex =
+      Number.isFinite(Number(imageIndex)) && Number(imageIndex) >= 0
+        ? Math.floor(Number(imageIndex))
+        : 0;
+
+    setActiveImageIndex(safeImageIndex);
+
+    if (!hasVariants || productVariants.length === 0) return;
+
+    const variantForImage = productVariants.find(
+      (variant) =>
+        getSafeVariantImageIndex(variant, galleryImages.length) === safeImageIndex
+    );
+
+    if (variantForImage) {
+      setSelectedVariantCode(variantForImage.codigo);
+    }
+  };
 
   const goToLogin = () => {
     navigate(
@@ -312,20 +384,9 @@ function ProductDetailPage() {
 
   useEffect(() => {
     setActiveImageIndex(0);
+    setSelectedVariantCode("");
     setMessage("");
   }, [slug]);
-  useEffect(() => {
-    if (productVariants.length === 0) {
-      setSelectedVariantCode("");
-      return;
-    }
-
-    setSelectedVariantCode((currentCode) => {
-      const exists = productVariants.some((variant) => variant.codigo === currentCode);
-      return exists ? currentCode : productVariants[0].codigo;
-    });
-  }, [productId, productVariants.map((variant) => variant.codigo).join("|")]);
-
 
   useEffect(() => {
     refreshPreferenceState({ silent: true });
@@ -345,29 +406,28 @@ function ProductDetailPage() {
   }, [productId, product?.slug]);
 
   const goToPreviousImage = () => {
-    setActiveImageIndex((currentIndex) => {
-      if (!hasMultipleImages) return currentIndex;
-      return currentIndex === 0 ? galleryImages.length - 1 : currentIndex - 1;
-    });
+    if (!hasMultipleImages) return;
+
+    const nextImageIndex =
+      displayImageIndex === 0 ? galleryImages.length - 1 : displayImageIndex - 1;
+
+    selectImageAndRelatedVariant(nextImageIndex);
   };
 
   const goToNextImage = () => {
-    setActiveImageIndex((currentIndex) => {
-      if (!hasMultipleImages) return currentIndex;
-      return currentIndex === galleryImages.length - 1 ? 0 : currentIndex + 1;
-    });
+    if (!hasMultipleImages) return;
+
+    const nextImageIndex =
+      displayImageIndex === galleryImages.length - 1 ? 0 : displayImageIndex + 1;
+
+    selectImageAndRelatedVariant(nextImageIndex);
   };
 
-  const handleAddToOrderList = async () => {
+  const handleAddToOrderList = () => {
     if (!product) return;
 
     if (!isAuthenticated) {
       goToLogin();
-      return;
-    }
-
-    if (!isMongoObjectId(productId)) {
-      setMessage("Este producto aún está siendo preparado. Intenta nuevamente más tarde.");
       return;
     }
 
@@ -376,27 +436,24 @@ function ProductDetailPage() {
       return;
     }
 
-    try {
-      setOrderLoading(true);
-      setMessage("");
+    const storedProduct = buildStoredProduct(product, selectedVariant);
+    const currentList = readLocalArray(ORDER_LIST_KEY);
 
-      await addProductToCart(productId, 1, selectedVariant);
-
-      setMessage(
-        selectedVariant
-          ? `Agregado a tu lista: ${selectedVariant.nombre}.`
-          : "Producto agregado a tu lista de pedido."
+    const exists = currentList.some((item) => {
+      return (
+        item.id === storedProduct.id ||
+        item.productId === storedProduct.productId ||
+        item.slug === storedProduct.slug
       );
-    } catch (error) {
-      if (error.status === 401 || error.message?.toLowerCase().includes("token")) {
-        goToLogin();
-        return;
-      }
+    });
 
-      setMessage(error.message || "No se pudo agregar a la lista de pedido.");
-    } finally {
-      setOrderLoading(false);
+    if (exists) {
+      setMessage("Este producto ya está en tu lista de pedido.");
+      return;
     }
+
+    saveLocalArray(ORDER_LIST_KEY, [...currentList, storedProduct]);
+    setMessage("Producto agregado a tu lista de pedido.");
   };
 
   const handleSaveFavorite = async () => {
@@ -513,6 +570,7 @@ function ProductDetailPage() {
           <div className="relative overflow-hidden rounded-[28px] bg-[#F8F6F7]">
             {hasImages ? (
               <CroppedImagePreview
+                key={`${displayImageIndex}-${getImageSource(activeImage)}`}
                 image={activeImage}
                 alt={product.nombre}
                 className="aspect-square w-full"
@@ -546,7 +604,7 @@ function ProductDetailPage() {
                 </button>
 
                 <div className="absolute bottom-4 left-1/2 z-10 -translate-x-1/2 rounded-full bg-white/95 px-4 py-2 text-xs font-black smika-shadow">
-                  {activeImageIndex + 1} / {galleryImages.length}
+                  {displayImageIndex + 1} / {galleryImages.length}
                 </div>
               </>
             )}
@@ -558,9 +616,9 @@ function ProductDetailPage() {
                 <button
                   key={`${getImageSource(image)}-${index}`}
                   type="button"
-                  onClick={() => setActiveImageIndex(index)}
+                  onClick={() => selectImageAndRelatedVariant(index)}
                   className={`aspect-square overflow-hidden rounded-2xl bg-[#F8F6F7] p-1 transition ${
-                    index === activeImageIndex
+                    index === displayImageIndex
                       ? "ring-4 ring-[#87CCC8]"
                       : "ring-1 ring-[#87CCC8]/10"
                   }`}
@@ -699,6 +757,7 @@ function ProductDetailPage() {
                         {variantImage && (
                           <span className="block h-14 w-14 shrink-0 overflow-hidden rounded-2xl bg-[#F8F6F7]">
                             <CroppedImagePreview
+                              key={`${variant.codigo}-${variantImageIndex}-${getImageSource(variantImage)}`}
                               image={variantImage}
                               alt={`${product.nombre} ${variant.nombre}`}
                               className="h-full w-full"
@@ -735,14 +794,9 @@ function ProductDetailPage() {
             <button
               type="button"
               onClick={handleAddToOrderList}
-              disabled={orderLoading}
-              className="smika-button-primary flex items-center gap-2 disabled:opacity-60"
+              className="smika-button-primary flex items-center gap-2"
             >
-              {orderLoading ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <ShoppingBag size={18} />
-              )}
+              <ShoppingBag size={18} />
               Agregar a lista de pedido
             </button>
 
